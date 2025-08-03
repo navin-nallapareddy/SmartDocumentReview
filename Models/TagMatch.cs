@@ -8,5 +8,6 @@ namespace SmartDocumentReview.Models
         public string MatchedText { get; set; }
         public string CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
+        public int DocumentId { get; set; }
     }
 }
