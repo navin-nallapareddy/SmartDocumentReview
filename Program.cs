@@ -18,7 +18,9 @@ string ConvertDatabaseUrlToNpgsql(string dbUrl)
     var uri = new Uri(dbUrl);
     var userInfo = uri.UserInfo.Split(':');
 
-    return $"Host={uri.Host};Port={uri.Port};Username={userInfo[0]};Password={userInfo[1]};Database={uri.AbsolutePath.TrimStart('/')};SSL Mode=Require;Trust Server Certificate=true";
+    int port = uri.IsDefaultPort || uri.Port <= 0 ? 5432 : uri.Port;
+
+    return $"Host={uri.Host};Port={port};Username={userInfo[0]};Password={userInfo[1]};Database={uri.AbsolutePath.TrimStart('/')};SSL Mode=Require;Trust Server Certificate=true";
 }
 
 var connectionString = ConvertDatabaseUrlToNpgsql(databaseUrl);
