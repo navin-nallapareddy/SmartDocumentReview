@@ -3,6 +3,7 @@
 @using SmartDocumentReview.Services
 @using SmartDocumentReview.Models
 @inject AuthService AuthService
+@inject PdfKeywordTagger Tagger
 
 <h3>Smart Document Review</h3>
 
@@ -34,7 +35,12 @@
         <ul>
             @foreach (var match in MatchedKeywords)
             {
-                <li><strong>@match.SectionTitle:</strong> @match.MatchedText</li>
+                <li>
+                    <strong>@match.SectionTitle:</strong><br />
+                    <em>@match.MatchedText</em><br />
+                    <small>Keyword: <code>@match.Keyword</code></small>
+                </li>
+                <hr />
             }
         </ul>
     }
@@ -80,18 +86,14 @@
 
         IsProcessing = true;
 
-        // Simulate match (replace with real logic later)
-        await Task.Delay(1000);
-        foreach (var kw in keywords)
+        try
         {
-            MatchedKeywords.Add(new TagMatch
-            {
-                Keyword = kw,
-                SectionTitle = "Section X",
-                MatchedText = $"Example paragraph mentioning {kw}.",
-                CreatedBy = AuthService.CurrentUser,
-                CreatedAt = DateTime.UtcNow
-            });
+            using var stream = uploadedFile.OpenReadStream(20 * 1024 * 1024); // 20MB max
+            MatchedKeywords = Tagger.ProcessPdf(stream, keywords, AuthService.CurrentUser);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Error processing PDF: " + ex.Message;
         }
 
         IsProcessing = false;
