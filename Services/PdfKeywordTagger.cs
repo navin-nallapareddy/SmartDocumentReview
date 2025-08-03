@@ -32,7 +32,8 @@ namespace SmartDocumentReview.Services
                             SectionTitle = sectionTitle,
                             MatchedText = match.Value,
                             CreatedBy = createdBy,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = DateTime.UtcNow,
+                            PageNumber = i
                         });
                     }
                 }

@@ -4,7 +4,8 @@ namespace SmartDocumentReview.Models
     {
         public int Id { get; set; }
         public string FileName { get; set; }
-        public string UploadedBy { get; set; }
-        public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+        public string FilePath { get; set; }
+        public string CreatedBy { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }
