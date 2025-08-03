@@ -7,7 +7,7 @@
     html, body { margin: 0; height: 100%; }
     #viewerContainer { position: relative; width: 100%; height: 100%; overflow: auto; }
     canvas { display: block; margin: auto; }
-    mark { background: yellow; color: black; }
+    mark { color: black; }
   </style>
 </head>
 <body>
@@ -18,6 +18,7 @@
     const file = urlParams.get('file') || '';
     const page = parseInt(urlParams.get('page') || '1', 10);
     const highlight = urlParams.get('highlight') || '';
+    const color = urlParams.get('color') || 'yellow';
     const container = document.getElementById('viewerContainer');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
 
@@ -46,7 +47,7 @@
             if (highlight) {
               const regex = new RegExp(highlight, 'gi');
               textLayerDiv.querySelectorAll('span').forEach(span => {
-                span.innerHTML = span.textContent.replace(regex, match => `<mark>${match}</mark>`);
+                span.innerHTML = span.textContent.replace(regex, match => `<mark style="background-color: ${color};">${match}</mark>`);
               });
             }
           });

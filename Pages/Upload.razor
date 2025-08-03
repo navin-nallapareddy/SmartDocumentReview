@@ -4,11 +4,11 @@
 @using SmartDocumentReview.Models
 @using SmartDocumentReview.Data
 @using System.IO
+@using System.Text.RegularExpressions
 @inject AuthService AuthService
 @inject PdfKeywordTagger Tagger
 @inject TagDbContext Db
-@inject ResultStateService ResultStateService
-@inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <h3 class="mb-4 text-center">Smart Document Review</h3>
 
@@ -34,8 +34,32 @@
         {
             <p class="mt-3">Processing... @ElapsedTime</p>
         }
-    </div>
 </div>
+</div>
+
+@if (MatchedKeywords.Any())
+{
+    <div class="mt-4" style="display: flex; height: 90vh;">
+        <!-- Left: Match Results -->
+        <div style="width: 40%; overflow-y: auto; padding: 1rem;">
+            @foreach (var match in MatchedKeywords)
+            {
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 @onclick="() => LoadPdf(match.PageNumber, match.Keyword)"
+                        style="cursor: pointer; color: blue; text-decoration: underline;">
+                        @match.SectionTitle
+                    </h4>
+                    <p>@(HighlightKeyword(match.MatchedText, match.Keyword))</p>
+                </div>
+            }
+        </div>
+
+        <!-- Right: PDF Viewer -->
+        <div style="width: 60%; height: 100%;">
+            <iframe id="pdfViewer" width="100%" height="100%" frameborder="0"></iframe>
+        </div>
+    </div>
+}
 
 @code {
     private IBrowserFile? uploadedFile;
@@ -45,6 +69,8 @@
     public string ElapsedTime { get; set; } = "00:00";
 
     public List<TagMatch> MatchedKeywords { get; set; } = new();
+    private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
+    private Dictionary<string, string> keywordColors = new();
 
     private readonly System.Diagnostics.Stopwatch _stopwatch = new();
     private System.Timers.Timer? _timer;
@@ -72,6 +98,10 @@
             .Distinct()
             .Take(5)
             .ToList();
+
+        keywordColors = keywords
+            .Select((k, i) => new { k, i })
+            .ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
 
         if (!keywords.Any())
         {
@@ -126,8 +156,10 @@
             Db.TagMatches.AddRange(MatchedKeywords);
             await Db.SaveChangesAsync();
 
-            ResultStateService.Matches = MatchedKeywords;
-            Navigation.NavigateTo("/results");
+            if (MatchedKeywords.Count > 0)
+            {
+                LoadPdf(MatchedKeywords[0].PageNumber, MatchedKeywords[0].Keyword);
+            }
         }
         catch (Exception ex)
         {
@@ -138,6 +170,24 @@
         {
             IsProcessing = false;
             _timer?.Stop();
+            StateHasChanged();
         }
+    }
+
+    void LoadPdf(int page, string keyword)
+    {
+        var file = "/uploads/latest.pdf";
+        var color = keywordColors.ContainsKey(keyword) ? keywordColors[keyword] : "yellow";
+        var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&highlight={Uri.EscapeDataString(keyword)}&color={Uri.EscapeDataString(color)}";
+        JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
+    }
+
+    MarkupString HighlightKeyword(string text, string keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword)) return (MarkupString)text;
+        var color = keywordColors.ContainsKey(keyword) ? keywordColors[keyword] : "yellow";
+        var regex = new Regex(Regex.Escape(keyword), RegexOptions.IgnoreCase);
+        var highlighted = regex.Replace(text, m => $"<mark style=\"background-color: {color};\">{m.Value}</mark>");
+        return (MarkupString)highlighted;
     }
 }
