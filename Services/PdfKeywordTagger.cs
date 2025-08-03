@@ -23,7 +23,7 @@ namespace SmartDocumentReview.Services
                 foreach (var keyword in keywords)
                 {
                     var pattern = Regex.Escape(keyword);
-                    var regex = new Regex($@"(.{{0,60}}{pattern}.{{0,60}})", RegexOptions.IgnoreCase);
+                    var regex = new Regex($@"(.{{0,140}}{pattern}.{{0,140}})", RegexOptions.IgnoreCase);
                     foreach (Match match in regex.Matches(text))
                     {
                         matches.Add(new TagMatch
