@@ -1,55 +1,7 @@
+
 @page "/upload"
-@inject NavigationManager Navigation
+@using SmartDocumentReview.Services
 @inject AuthService AuthService
 
-<h3>Upload Document & Keywords</h3>
-
-<InputFile OnChange="HandleFileSelected" />
-<br /><br />
-<label>Enter Keywords (one per line, max 5 words each):</label>
-<textarea class="form-control" rows="6" @bind="RawKeywordInput"></textarea>
-<br />
-@if (KeywordErrors.Any())
-{
-    <div class="alert alert-warning">
-        <ul>
-        @foreach (var err in KeywordErrors)
-        {
-            <li>@err</li>
-        }
-        </ul>
-    </div>
-}
-<button class="btn btn-primary" @onclick="Submit">Process</button>
-
-@code {
-    private IBrowserFile uploadedFile;
-    private string RawKeywordInput;
-    private List<string> KeywordErrors = new();
-
-    private async Task HandleFileSelected(InputFileChangeEventArgs e)
-    {
-        uploadedFile = e.File;
-    }
-
-    private void Submit()
-    {
-        var keywords = RawKeywordInput?
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(k => k.Trim())
-            .Where(k => !string.IsNullOrWhiteSpace(k))
-            .ToList() ?? new();
-
-        KeywordErrors.Clear();
-        foreach (var kw in keywords)
-        {
-            if (kw.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length > 5)
-                KeywordErrors.Add($"Keyword '{kw}' exceeds 5-word limit.");
-        }
-
-        if (!KeywordErrors.Any() && uploadedFile != null)
-        {
-            Navigation.NavigateTo("/review");
-        }
-    }
-}
+<h3>Upload Page</h3>
+<p>Welcome, @AuthService.CurrentUser!</p>

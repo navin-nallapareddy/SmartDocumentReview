@@ -1,33 +1,13 @@
+
 @page "/review"
+@using SmartDocumentReview.Services
+@using SmartDocumentReview.Models
 @inject AuthService AuthService
 
-<h3>Matched Sections</h3>
+<h3>Review Page</h3>
+<p>Hi @AuthService.CurrentUser, here are your tag matches:</p>
 
-@foreach (var match in Matches)
-{
-    <div class="card mb-3 p-3">
-        <h5>@match.SectionTitle (Page @match.PageNumber)</h5>
-        <p>@((MarkupString)Highlight(match.MatchedText))</p>
-        <button class="btn btn-link" @onclick="() => ScrollToPage(match.PageNumber)">View in PDF</button>
-    </div>
-}
-
-<iframe id="pdfViewerFrame" src="/pdf-viewer/index.html" width="100%" height="600px"></iframe>
-
+@* Example usage of TagMatch model *@
 @code {
-    private List<TagMatch> Matches = new()
-    {
-        new TagMatch { SectionTitle = "IV.A.1", Keyword = "AI", PageNumber = 6, MatchedText = "This section describes how AI is used in review processes." },
-        new TagMatch { SectionTitle = "IV.B", Keyword = "Manufacturing", PageNumber = 12, MatchedText = "Manufacturing consistency relies on automation." }
-    };
-
-    private string Highlight(string text)
-    {
-        return text.Replace("AI", "<mark>AI</mark>").Replace("Manufacturing", "<mark>Manufacturing</mark>");
-    }
-
-    private async Task ScrollToPage(int page)
-    {
-        await JS.InvokeVoidAsync("goToPage", page);
-    }
+    private List<TagMatch> matches = new();
 }
