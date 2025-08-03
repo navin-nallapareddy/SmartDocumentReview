@@ -90,9 +90,12 @@
 
         try
         {
-            using var stream = uploadedFile.OpenReadStream(20 * 1024 * 1024);
+            using var readStream = uploadedFile.OpenReadStream(20 * 1024 * 1024);
+            using var memoryStream = new MemoryStream();
+            await readStream.CopyToAsync(memoryStream);
+            memoryStream.Position = 0;
 
-            MatchedKeywords = Tagger.ProcessPdf(stream, keywords, AuthService.CurrentUser);
+            MatchedKeywords = Tagger.ProcessPdf(memoryStream, keywords, AuthService.CurrentUser);
 
             var document = new Document
             {
