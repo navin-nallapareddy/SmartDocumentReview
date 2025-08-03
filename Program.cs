@@ -32,6 +32,7 @@ builder.Services.AddDbContext<TagDbContext>(options =>
 // Register services
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<PdfKeywordTagger>();
+builder.Services.AddScoped<ResultStateService>();
 
 // Setup Razor/Blazor
 builder.Services.AddRazorPages();
