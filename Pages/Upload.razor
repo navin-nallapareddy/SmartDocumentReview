@@ -131,7 +131,8 @@
         }
         catch (Exception ex)
         {
-            ErrorMessage = "Error processing PDF: " + ex.Message;
+            var message = ex.InnerException?.Message ?? ex.Message;
+            ErrorMessage = "Error processing PDF: " + message;
         }
         finally
         {

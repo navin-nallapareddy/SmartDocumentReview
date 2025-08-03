@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.EntityFrameworkCore;
 using SmartDocumentReview.Data;
 using SmartDocumentReview.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,6 +40,13 @@ builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
 
 var app = builder.Build();
+
+// Ensure the database exists
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<TagDbContext>();
+    db.Database.EnsureCreated();
+}
 
 // Configure HTTP request pipeline
 if (!app.Environment.IsDevelopment())
