@@ -1,0 +1,16 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+}
+
+.main-layout {
+    min-height: 100vh;
+}
+
+.card {
+    border-radius: 0.5rem;
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
