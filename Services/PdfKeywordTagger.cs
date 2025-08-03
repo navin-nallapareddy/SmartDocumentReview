@@ -12,6 +12,7 @@ namespace SmartDocumentReview.Services
             var matches = new List<TagMatch>();
 
             using var reader = new PdfReader(pdfStream);
+            reader.SetCloseStream(false);
             using var pdf = new PdfDocument(reader);
 
             for (int i = 1; i <= pdf.GetNumberOfPages(); i++)
