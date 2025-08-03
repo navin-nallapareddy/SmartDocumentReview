@@ -2,18 +2,57 @@
 <html>
 <head>
   <title>PDF Viewer</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf_viewer.min.css" />
   <style>
     html, body { margin: 0; height: 100%; }
-    iframe { width: 100%; height: 100%; border: none; }
+    #viewerContainer { position: relative; width: 100%; height: 100%; overflow: auto; }
+    canvas { display: block; margin: auto; }
+    mark { background: yellow; color: black; }
   </style>
 </head>
 <body>
-  <iframe id="pdfFrame" allowfullscreen></iframe>
+  <div id="viewerContainer"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const file = urlParams.get('file') || '';
-    const page = urlParams.get('page') || '1';
-    document.getElementById('pdfFrame').src = `${file}#page=${page}`;
+    const page = parseInt(urlParams.get('page') || '1', 10);
+    const highlight = urlParams.get('highlight') || '';
+    const container = document.getElementById('viewerContainer');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+
+    pdfjsLib.getDocument(file).promise.then(pdf => {
+      pdf.getPage(page).then(p => {
+        const viewport = p.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        container.appendChild(canvas);
+
+        const textLayerDiv = document.createElement('div');
+        textLayerDiv.className = 'textLayer';
+        container.appendChild(textLayerDiv);
+
+        p.render({ canvasContext: context, viewport });
+
+        p.getTextContent().then(textContent => {
+          pdfjsLib.renderTextLayer({
+            textContent,
+            container: textLayerDiv,
+            viewport,
+            textDivs: []
+          }).promise.then(() => {
+            if (highlight) {
+              const regex = new RegExp(highlight, 'gi');
+              textLayerDiv.querySelectorAll('span').forEach(span => {
+                span.innerHTML = span.textContent.replace(regex, match => `<mark>${match}</mark>`);
+              });
+            }
+          });
+        });
+      });
+    });
   </script>
 </body>
 </html>
