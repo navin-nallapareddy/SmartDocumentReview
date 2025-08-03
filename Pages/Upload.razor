@@ -84,7 +84,16 @@
 @code {
     private IBrowserFile? uploadedFile;
     public string RawKeywordInput { get; set; } = string.Empty;
-    public bool IsProcessing { get; set; } = false;
+    private enum ProcessingState
+    {
+        Idle,
+        Processing,
+        Completed,
+        Failed
+    }
+
+    private ProcessingState Status { get; set; } = ProcessingState.Idle;
+    public bool IsProcessing => Status == ProcessingState.Processing;
     public string? ErrorMessage { get; set; }
     public string ElapsedTime { get; set; } = "00:00";
 
@@ -129,7 +138,7 @@
             return;
         }
 
-        IsProcessing = true;
+        Status = ProcessingState.Processing;
         _stopwatch.Restart();
         _timer = new System.Timers.Timer(1000);
         _timer.Elapsed += (s, e) =>
@@ -179,17 +188,23 @@
             {
                 LoadPdf(MatchedKeywords[0].PageNumber, MatchedKeywords[0].Keyword);
             }
+
+            await InvokeAsync(StateHasChanged);
+            Status = ProcessingState.Completed;
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
             var message = ex.InnerException?.Message ?? ex.Message;
             ErrorMessage = "Error processing PDF: " + message;
+            await InvokeAsync(StateHasChanged);
+            Status = ProcessingState.Failed;
+            await InvokeAsync(StateHasChanged);
         }
         finally
         {
-            IsProcessing = false;
             _timer?.Stop();
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
