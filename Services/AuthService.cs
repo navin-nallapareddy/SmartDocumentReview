@@ -1,13 +1,8 @@
-public class AuthService
+
+namespace SmartDocumentReview.Services
 {
-    private string _currentUser;
-
-    public Task LoginAsync(string username)
+    public class AuthService
     {
-        _currentUser = username;
-        return Task.CompletedTask;
+        public string CurrentUser => "testuser";
     }
-
-    public string GetCurrentUser() => _currentUser ?? "anonymous";
-    public bool IsLoggedIn() => !string.IsNullOrEmpty(_currentUser);
 }

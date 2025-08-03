@@ -1,6 +1,12 @@
+
 using Microsoft.EntityFrameworkCore;
-public class TagDbContext : DbContext
+using SmartDocumentReview.Models;
+
+namespace SmartDocumentReview.Data
 {
-    public DbSet<TagMatch> TagMatches { get; set; }
-    public TagDbContext(DbContextOptions<TagDbContext> options) : base(options) { }
+    public class TagDbContext : DbContext
+    {
+        public TagDbContext(DbContextOptions<TagDbContext> options) : base(options) { }
+        public DbSet<TagMatch> TagMatches { get; set; }
+    }
 }

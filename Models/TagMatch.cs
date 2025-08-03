@@ -1,13 +1,12 @@
-public class TagMatch
+
+namespace SmartDocumentReview.Models
 {
-    public int Id { get; set; }
-    public int DocumentId { get; set; }
-    public string Keyword { get; set; }
-    public string SectionTitle { get; set; }
-    public string MatchedText { get; set; }
-    public int PageNumber { get; set; }
-    public string CreatedBy { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public string? UpdatedBy { get; set; }
-    public DateTime? UpdatedAt { get; set; }
+    public class TagMatch
+    {
+        public int Id { get; set; }
+        public string Keyword { get; set; } = default!;
+        public string SectionTitle { get; set; } = default!;
+        public string MatchedText { get; set; } = default!;
+        public string CreatedBy { get; set; } = default!;
+    }
 }
