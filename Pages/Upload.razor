@@ -16,31 +16,37 @@
     <div class="card-body">
         <p class="fw-semibold">Welcome, @AuthService.CurrentUser!</p>
 
-        <EditForm Model="this" OnValidSubmit="HandleValidSubmit">
-            <div class="row g-3 align-items-start mb-3">
-                <!-- Upload -->
-                <div class="col-md-4">
-                    <label class="form-label fw-semibold">Upload PDF:</label>
-                    <InputFile class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
+<EditForm Model="this" OnValidSubmit="HandleValidSubmit">
+    <div class="row align-items-end g-3">
+        <!-- Upload File -->
+        <div class="col-md-4">
+            <label class="form-label fw-semibold">Upload PDF:</label>
+            <InputFile class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
+        </div>
+
+        <!-- Keywords -->
+        <div class="col-md-5">
+            <label class="form-label fw-semibold">Enter up to 5 keywords (one per line):</label>
+            <InputTextArea class="form-control" @bind-Value="RawKeywordInput" Rows="3" />
+        </div>
+
+        <!-- Process Button + Spinner -->
+        <div class="col-md-3 d-flex flex-column justify-content-end">
+            <button type="submit" class="btn btn-primary mb-2" disabled="@IsProcessing">Process</button>
+            @if (IsProcessing)
+            {
+                <div class="spinner-border text-primary mx-auto" style="width: 1.5rem; height: 1.5rem;" role="status">
+                    <span class="visually-hidden">Processing...</span>
                 </div>
+            }
+        </div>
+    </div>
+</EditForm>
 
-                <!-- Keywords -->
-                <div class="col-md-8">
-                    <label class="form-label fw-semibold">Enter up to 5 keywords (one per line):</label>
-                    <InputTextArea class="form-control" @bind-Value="RawKeywordInput" Rows="5" />
-                </div>
-            </div>
-
-            <!-- Submit -->
-            <div class="mb-3">
-                <button type="submit" class="btn btn-primary w-100" disabled="@IsProcessing">Process</button>
-            </div>
-        </EditForm>
-
-        @if (ErrorMessage != null)
-        {
-            <div class="alert alert-danger">@ErrorMessage</div>
-        }
+@if (ErrorMessage != null)
+{
+    <div class="alert alert-danger mt-3">@ErrorMessage</div>
+}
 
         @if (IsProcessing)
         {
