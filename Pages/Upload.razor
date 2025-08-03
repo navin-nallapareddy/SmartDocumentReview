@@ -12,32 +12,33 @@
 
 <div class="min-h-screen p-6">
     <h3 class="text-2xl font-semibold text-center mb-6">Smart Document Review</h3>
-    <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
-        <!-- Left column: Upload form and results -->
-        <div class="space-y-6">
-            <div class="bg-white shadow rounded-lg p-6">
-                <p class="font-medium mb-4">Welcome, @AuthService.CurrentUser!</p>
+    <div class="max-w-7xl mx-auto space-y-6">
+        <div class="bg-white shadow rounded-lg p-6">
+            <p class="font-medium mb-4">Welcome, @AuthService.CurrentUser!</p>
 
-                <EditForm Model="this" OnValidSubmit="HandleValidSubmit">
+            <EditForm Model="this" OnValidSubmit="HandleValidSubmit">
+                <div class="flex flex-col md:flex-row gap-4">
                     <InputFile class="w-full px-3 py-2 border border-gray-300 rounded-lg" OnChange="HandleFileSelected" accept=".pdf" />
-                    <div class="mt-4">
+                    <div class="flex-1">
                         <label class="block mb-2 text-sm font-medium text-gray-700">Enter up to 5 keywords (one per line):</label>
                         <InputTextArea class="w-full px-3 py-2 border border-gray-300 rounded-lg" @bind-Value="RawKeywordInput" Rows="6" />
                     </div>
-                    <button type="submit" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50" disabled="@IsProcessing">Process</button>
-                </EditForm>
+                </div>
+                <button type="submit" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50" disabled="@IsProcessing">Process</button>
+            </EditForm>
 
-                @if (ErrorMessage != null)
-                {
-                    <div class="mt-4 text-red-600">@ErrorMessage</div>
-                }
+            @if (ErrorMessage != null)
+            {
+                <div class="mt-4 text-red-600">@ErrorMessage</div>
+            }
 
-                @if (IsProcessing)
-                {
-                    <p class="mt-4">Processing... @ElapsedTime</p>
-                }
-            </div>
+            @if (IsProcessing)
+            {
+                <p class="mt-4">Processing... @ElapsedTime</p>
+            }
+        </div>
 
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             @if (MatchedKeywords.Any())
             {
                 <div class="bg-white shadow rounded-lg p-6 overflow-y-auto max-h-[60vh]">
@@ -52,22 +53,19 @@
                     }
                 </div>
             }
-        </div>
 
-        <!-- Right column: Summary/PDF viewer -->
-        <div class="flex flex-col">
-            @if (MatchedKeywords.Any())
-            {
-                <div class="bg-white shadow rounded-lg h-full p-4 overflow-y-auto">
+            <div class="bg-white shadow rounded-lg h-full p-4 overflow-y-auto">
+                @if (MatchedKeywords.Any())
+                {
                     <iframe id="pdfViewer" class="w-full h-full" frameborder="0"></iframe>
-                </div>
-            }
-            else
-            {
-                <div class="bg-white shadow rounded-lg h-full p-6 flex items-center justify-center text-gray-500">
-                    <p>Summary will appear here after processing.</p>
-                </div>
-            }
+                }
+                else
+                {
+                    <div class="h-full flex items-center justify-center text-gray-500">
+                        <p>Summary will appear here after processing.</p>
+                    </div>
+                }
+            </div>
         </div>
     </div>
 </div>
