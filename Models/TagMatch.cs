@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace SmartDocumentReview.Models
 {
     public class TagMatch
@@ -7,6 +9,7 @@ namespace SmartDocumentReview.Models
         public string SectionTitle { get; set; }
         public string MatchedText { get; set; }
         public string CreatedBy { get; set; }
+        [Column("CreatedAt")]
         public DateTime CreatedAt { get; set; }
         public int DocumentId { get; set; }
         public int PageNumber { get; set; }
