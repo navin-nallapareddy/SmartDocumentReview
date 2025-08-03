@@ -1,0 +1,43 @@
+@page "/results"
+@using SmartDocumentReview.Models
+@inject NavigationManager Nav
+
+<h3>Review Results</h3>
+
+@if (Matches?.Any() == true)
+{
+    <ul class="list-group">
+        @foreach (var match in Matches)
+        {
+            <li class="list-group-item">
+                <strong>
+                    <a href="@GetPreviewUrl(match.SectionTitle)">
+                        @match.SectionTitle
+                    </a>
+                </strong>
+                <p>@HighlightKeyword(match.MatchedText, match.Keyword)</p>
+            </li>
+        }
+    </ul>
+}
+else
+{
+    <p>No matches found.</p>
+}
+
+@code {
+    [Parameter] public List<TagMatch>? Matches { get; set; }
+
+    private string GetPreviewUrl(string sectionTitle)
+    {
+        // Assumes section title like "Page 3"
+        var page = sectionTitle.Replace("Page ", "").Trim();
+        return $"/preview?file=/uploads/latest.pdf#page={page}";
+    }
+
+    private MarkupString HighlightKeyword(string text, string keyword)
+    {
+        var highlighted = text.Replace(keyword, $"<mark>{keyword}</mark>", StringComparison.OrdinalIgnoreCase);
+        return new MarkupString(highlighted);
+    }
+}
