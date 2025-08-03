@@ -2,8 +2,10 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using SmartDocumentReview.Services
 @using SmartDocumentReview.Models
+@using SmartDocumentReview.Data
 @inject AuthService AuthService
 @inject PdfKeywordTagger Tagger
+@inject TagDbContext Db
 
 <h3>Smart Document Review</h3>
 
@@ -88,8 +90,26 @@
 
         try
         {
-            using var stream = uploadedFile.OpenReadStream(20 * 1024 * 1024); // 20MB max
+            using var stream = uploadedFile.OpenReadStream(20 * 1024 * 1024);
+
             MatchedKeywords = Tagger.ProcessPdf(stream, keywords, AuthService.CurrentUser);
+
+            var document = new Document
+            {
+                FileName = uploadedFile.Name,
+                UploadedBy = AuthService.CurrentUser,
+                UploadedAt = DateTime.UtcNow
+            };
+            Db.Documents.Add(document);
+            await Db.SaveChangesAsync();
+
+            foreach (var match in MatchedKeywords)
+            {
+                match.DocumentId = document.Id;
+            }
+
+            Db.TagMatches.AddRange(MatchedKeywords);
+            await Db.SaveChangesAsync();
         }
         catch (Exception ex)
         {
