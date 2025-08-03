@@ -1,9 +1,98 @@
 @page "/"
-
+@using Microsoft.AspNetCore.Components.Forms
 @using SmartDocumentReview.Services
 @inject AuthService AuthService
 
-<h3>Upload Page</h3>
-<p>Welcome, @AuthService.CurrentUser!</p>
+<h3>Smart Document Review</h3>
 
-<!-- File upload and keyword entry UI would be here -->
+<div class="p-4 rounded border shadow-sm bg-white max-w-xl">
+    <p><strong>Welcome, @AuthService.CurrentUser!</strong></p>
+
+    <EditForm Model="this" OnValidSubmit="HandleValidSubmit">
+        <InputFile OnChange="HandleFileSelected" accept=".pdf" />
+        <br /><br />
+        <label>Enter up to 5 keywords (one per line):</label><br />
+        <InputTextArea class="form-control w-full p-2 border" @bind-Value="RawKeywordInput" Rows="6" />
+        <br />
+        <button type="submit" class="btn btn-primary" disabled="@IsProcessing">Process</button>
+    </EditForm>
+
+    @if (ErrorMessage != null)
+    {
+        <p class="text-danger">@ErrorMessage</p>
+    }
+
+    @if (IsProcessing)
+    {
+        <p>Processing...</p>
+    }
+
+    @if (MatchedKeywords?.Any() == true)
+    {
+        <h4 class="mt-4">Matches Found:</h4>
+        <ul>
+            @foreach (var match in MatchedKeywords)
+            {
+                <li><strong>@match.SectionTitle:</strong> @match.MatchedText</li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private IBrowserFile? uploadedFile;
+    public string RawKeywordInput { get; set; } = string.Empty;
+    public bool IsProcessing { get; set; } = false;
+    public string? ErrorMessage { get; set; }
+
+    public List<TagMatch> MatchedKeywords { get; set; } = new();
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        uploadedFile = e.File;
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        ErrorMessage = null;
+        MatchedKeywords.Clear();
+
+        if (uploadedFile == null)
+        {
+            ErrorMessage = "Please upload a PDF file.";
+            return;
+        }
+
+        var keywords = RawKeywordInput
+            .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(k => k.Trim())
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Distinct()
+            .Take(5)
+            .ToList();
+
+        if (!keywords.Any())
+        {
+            ErrorMessage = "Enter at least one keyword.";
+            return;
+        }
+
+        IsProcessing = true;
+
+        // Simulate match (replace with real logic later)
+        await Task.Delay(1000);
+        foreach (var kw in keywords)
+        {
+            MatchedKeywords.Add(new TagMatch
+            {
+                Keyword = kw,
+                SectionTitle = "Section X",
+                MatchedText = $"Example paragraph mentioning {kw}.",
+                CreatedBy = AuthService.CurrentUser,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
+        IsProcessing = false;
+    }
+}
