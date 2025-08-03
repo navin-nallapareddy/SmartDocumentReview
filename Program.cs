@@ -1,3 +1,10 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.EntityFrameworkCore;
+using Npgsql.EntityFrameworkCore.PostgreSQL;
+using SmartDocumentReview.Data;
+using SmartDocumentReview.Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
