@@ -13,9 +13,7 @@
     const urlParams = new URLSearchParams(window.location.search);
     const file = urlParams.get('file') || '';
     const page = urlParams.get('page') || '1';
-    const highlight = urlParams.get('highlight') || '';
-    const viewerUrl = `/pdfjs/web/viewer.html?file=${file}#page=${page}`;
-    document.getElementById("pdfFrame").src = viewerUrl;
+    document.getElementById('pdfFrame').src = `${file}#page=${page}`;
   </script>
 </body>
 </html>
