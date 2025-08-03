@@ -12,31 +12,24 @@
 
 <h3 class="mb-4 text-center">Smart Document Review</h3>
 
-<div class="card shadow-sm mx-auto" style="max-width:600px;">
+<div class="card shadow-sm mx-auto" style="max-width: 600px;">
     <div class="card-body">
         <p class="fw-semibold">Welcome, @AuthService.CurrentUser!</p>
 
         <EditForm Model="this" OnValidSubmit="HandleValidSubmit">
-            <table class="table table-bordered">
-                <tr>
-                    <td style="width: 30%; vertical-align: top;">Upload PDF:</td>
-                    <td>
-                        <InputFile class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
-                    </td>
-                </tr>
-                <tr>
-                    <td style="vertical-align: top;">Enter Keywords:</td>
-                    <td>
-                        <label class="form-label">Enter up to 5 keywords (one per line):</label>
-                        <InputTextArea class="form-control" @bind-Value="RawKeywordInput" Rows="6" />
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="2" class="text-end">
-                        <button type="submit" class="btn btn-primary mt-3" disabled="@IsProcessing">Process</button>
-                    </td>
-                </tr>
-            </table>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Upload PDF:</label>
+                <InputFile class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Enter up to 5 keywords (one per line):</label>
+                <InputTextArea class="form-control" @bind-Value="RawKeywordInput" Rows="5" />
+            </div>
+
+            <div class="d-grid">
+                <button type="submit" class="btn btn-primary" disabled="@IsProcessing">Process</button>
+            </div>
         </EditForm>
 
         @if (ErrorMessage != null)
@@ -50,7 +43,6 @@
         }
     </div>
 </div>
-
 
 @if (MatchedKeywords.Any())
 {
