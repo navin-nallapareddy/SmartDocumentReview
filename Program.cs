@@ -1,26 +1,50 @@
-
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.EntityFrameworkCore;
-using Npgsql.EntityFrameworkCore.PostgreSQL;
 using SmartDocumentReview.Data;
 using SmartDocumentReview.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load DATABASE_URL from environment (Render)
+var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+
+if (string.IsNullOrEmpty(databaseUrl))
+    throw new InvalidOperationException("DATABASE_URL not configured.");
+
+// Convert DATABASE_URL to Npgsql format
+string ConvertDatabaseUrlToNpgsql(string dbUrl)
+{
+    var uri = new Uri(dbUrl);
+    var userInfo = uri.UserInfo.Split(':');
+
+    return $"Host={uri.Host};Port={uri.Port};Username={userInfo[0]};Password={userInfo[1]};Database={uri.AbsolutePath.TrimStart('/')};SSL Mode=Require;Trust Server Certificate=true";
+}
+
+var connectionString = ConvertDatabaseUrlToNpgsql(databaseUrl);
+
+// Register PostgreSQL DbContext
+builder.Services.AddDbContext<TagDbContext>(options =>
+    options.UseNpgsql(connectionString));
+
+// Register services
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<PdfKeywordTagger>();
+
+// Setup Razor/Blazor
 builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
-builder.Services.AddAuthorizationCore();
-builder.Services.AddScoped<AuthService>();
-builder.Services.AddDbContext<TagDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
 
+// Configure HTTP request pipeline
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
+    app.UseHsts();
 }
+
+app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 
