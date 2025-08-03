@@ -1,1 +1,39 @@
-<!-- Login Page UI -->
+@page "/login"
+@inject NavigationManager Navigation
+@inject AuthService AuthService
+
+<h3>Login</h3>
+@if (!string.IsNullOrEmpty(ErrorMessage))
+{
+    <div class="text-danger">@ErrorMessage</div>
+}
+
+<EditForm Model="loginModel" OnValidSubmit="HandleLogin">
+    <InputText @bind-Value="loginModel.Username" class="form-control" placeholder="Username" />
+    <InputText @bind-Value="loginModel.Password" type="password" class="form-control mt-2" placeholder="Password" />
+    <button class="btn btn-primary mt-3">Login</button>
+</EditForm>
+
+@code {
+    private LoginModel loginModel = new();
+    private string ErrorMessage;
+
+    private async Task HandleLogin()
+    {
+        if (loginModel.Username == "testuser" && loginModel.Password == "Test@123")
+        {
+            await AuthService.LoginAsync("testuser");
+            Navigation.NavigateTo("/upload");
+        }
+        else
+        {
+            ErrorMessage = "Invalid username or password.";
+        }
+    }
+
+    public class LoginModel
+    {
+        public string Username { get; set; }
+        public string Password { get; set; }
+    }
+}
