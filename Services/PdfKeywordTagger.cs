@@ -12,7 +12,6 @@ namespace SmartDocumentReview.Services
             var matches = new List<TagMatch>();
 
             using var reader = new PdfReader(pdfStream);
-            reader.SetCloseStream(false);
             using var pdf = new PdfDocument(reader);
 
             for (int i = 1; i <= pdf.GetNumberOfPages(); i++)
@@ -24,7 +23,7 @@ namespace SmartDocumentReview.Services
                 foreach (var keyword in keywords)
                 {
                     var pattern = Regex.Escape(keyword);
-                    var regex = new Regex($@"(.{{0,140}}{pattern}.{{0,140}})", RegexOptions.IgnoreCase);
+                    var regex = new Regex($@"(.{{0,60}}{pattern}.{{0,60}})", RegexOptions.IgnoreCase);
                     foreach (Match match in regex.Matches(text))
                     {
                         matches.Add(new TagMatch

@@ -1,39 +1,13 @@
+
 @page "/review"
 @using SmartDocumentReview.Services
 @using SmartDocumentReview.Models
-@using SmartDocumentReview.Data
-@using System.Linq
 @inject AuthService AuthService
-@inject TagDbContext Db
 
 <h3>Review Page</h3>
 <p>Hi @AuthService.CurrentUser, here are your tag matches:</p>
 
-@if (matches.Any())
-{
-    <ul class="list-disc pl-5">
-        @foreach (var match in matches)
-        {
-            <li class="mb-2">
-                <strong>@match.Keyword</strong> - @match.SectionTitle (Page @match.PageNumber)
-                <div>@match.MatchedText</div>
-            </li>
-        }
-    </ul>
-}
-else
-{
-    <p>No matches found.</p>
-}
-
+@* Example usage of TagMatch model *@
 @code {
     private List<TagMatch> matches = new();
-
-    protected override void OnInitialized()
-    {
-        matches = Db.TagMatches
-            .Where(t => t.CreatedBy == AuthService.CurrentUser)
-            .OrderByDescending(t => t.CreatedAt)
-            .ToList();
-    }
 }
