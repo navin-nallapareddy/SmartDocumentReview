@@ -216,7 +216,9 @@
         var highlighted = text;
         foreach (var kvp in keywordColors)
         {
-            var regex = new Regex(Regex.Escape(kvp.Key), RegexOptions.IgnoreCase);
+            var escaped = Regex.Escape(kvp.Key);
+            var pattern = Regex.IsMatch(kvp.Key, @"\W") ? escaped : $"\\b{escaped}\\b";
+            var regex = new Regex(pattern, RegexOptions.IgnoreCase);
             highlighted = regex.Replace(highlighted, m => $"<mark style=\"background-color: {kvp.Value};\">{m.Value}</mark>");
         }
         return (MarkupString)highlighted;
