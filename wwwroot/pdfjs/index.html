@@ -7,9 +7,8 @@
     html, body { margin: 0; height: 100%; }
     #viewerContainer { position: relative; width: 100%; height: 100%; overflow: auto; }
     canvas { display: block; margin: auto; }
-    mark { color: black; }
     #viewerContainer .textLayer { opacity: 1 !important; }
-    #viewerContainer .textLayer mark { background: yellow; opacity: 1; }
+    .highlight-overlay { position: absolute; pointer-events: none; opacity: 0.4; }
   </style>
 </head>
 <body>
@@ -47,14 +46,30 @@
             textDivs: []
           }).promise.then(() => {
             if (highlights.length > 0) {
+              const layerRect = textLayerDiv.getBoundingClientRect();
               textLayerDiv.querySelectorAll('span').forEach(span => {
-                let html = span.textContent;
+                const text = span.textContent;
                 highlights.forEach((h, i) => {
                   const regex = new RegExp(h, 'gi');
-                  const c = colors[i] || 'yellow';
-                  html = html.replace(regex, match => `<mark style="background-color: ${c};">${match}</mark>`);
+                  let match;
+                  while ((match = regex.exec(text)) !== null) {
+                    const range = document.createRange();
+                    range.setStart(span.firstChild, match.index);
+                    range.setEnd(span.firstChild, match.index + match[0].length);
+                    const rects = range.getClientRects();
+                    rects.forEach(r => {
+                      const highlight = document.createElement('div');
+                      highlight.className = 'highlight-overlay';
+                      highlight.style.backgroundColor = colors[i] || 'yellow';
+                      highlight.style.left = `${r.left - layerRect.left}px`;
+                      highlight.style.top = `${r.top - layerRect.top}px`;
+                      highlight.style.width = `${r.width}px`;
+                      highlight.style.height = `${r.height}px`;
+                      textLayerDiv.appendChild(highlight);
+                    });
+                    range.detach();
+                  }
                 });
-                span.innerHTML = html;
               });
             }
           });
