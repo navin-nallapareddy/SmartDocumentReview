@@ -4,6 +4,7 @@
 @inject IJSRuntime JS
 @using System.Linq
 @using System.Text.RegularExpressions
+@using SmartDocumentReview.Models
 
 <h3>Matched Results</h3>
 
@@ -30,11 +31,11 @@
 
 @code {
     private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
-    private Dictionary<string, string> keywordColors = new();
+    private Dictionary<Keyword, string> keywordColors = new();
 
     protected override void OnInitialized()
     {
-        var keywords = ResultStateService.Matches.Select(m => m.Keyword).Distinct().ToList();
+        var keywords = ResultStateService.Keywords;
         keywordColors = keywords.Select((k, i) => new { k, i }).ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
 
         // Load first match by default
@@ -48,7 +49,7 @@
     void LoadPdf(int page)
     {
         var file = "/uploads/latest.pdf";
-        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key)}&color={Uri.EscapeDataString(kvp.Value)}"));
+        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
         var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
         JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
@@ -59,8 +60,8 @@
         var highlighted = text;
         foreach (var kvp in keywordColors)
         {
-            var escaped = Regex.Escape(kvp.Key);
-            var pattern = Regex.IsMatch(kvp.Key, @"\W") ? escaped : $"\\b{escaped}\\b";
+            var escaped = Regex.Escape(kvp.Key.Text);
+            var pattern = (kvp.Key.AllowPartial || Regex.IsMatch(kvp.Key.Text, @"\W")) ? escaped : $"\\b{escaped}\\b";
             var regex = new Regex(pattern, RegexOptions.IgnoreCase);
             highlighted = regex.Replace(highlighted, m => $"<mark style=\"background-color: {kvp.Value};\">{m.Value}</mark>");
         }

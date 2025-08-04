@@ -10,6 +10,7 @@
 @inject PdfKeywordTagger Tagger
 @inject TagDbContext Db
 @inject IJSRuntime JS
+@inject ResultStateService ResultStateService
 
 <h3 class="mb-4 text-center">Smart Document Review</h3>
 
@@ -98,7 +99,7 @@
 
     public List<TagMatch> MatchedKeywords { get; set; } = new();
     private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
-    private Dictionary<string, string> keywordColors = new();
+    private Dictionary<Keyword, string> keywordColors = new();
 
     private readonly System.Diagnostics.Stopwatch _stopwatch = new();
     private System.Timers.Timer? _timer;
@@ -121,9 +122,13 @@
 
         var keywords = RawKeywordInput
             .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(k => k.Trim())
-            .Where(k => !string.IsNullOrWhiteSpace(k))
-            .Distinct()
+            .Select(k => {
+                var trimmed = k.Trim();
+                var allowPartial = trimmed.StartsWith("*");
+                var text = allowPartial ? trimmed.TrimStart('*') : trimmed;
+                return new Keyword(text, allowPartial);
+            })
+            .Where(k => !string.IsNullOrWhiteSpace(k.Text))
             .Take(5)
             .ToList();
 
@@ -155,6 +160,8 @@
             memoryStream.Position = 0;
 
             MatchedKeywords = Tagger.ProcessPdf(memoryStream, keywords, AuthService.CurrentUser);
+            ResultStateService.Matches = MatchedKeywords;
+            ResultStateService.Keywords = keywords;
 
             // Save uploaded file for PDF viewer
             memoryStream.Position = 0;
@@ -205,7 +212,7 @@
     void LoadPdf(int page)
     {
         var file = "/uploads/latest.pdf";
-        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key)}&color={Uri.EscapeDataString(kvp.Value)}"));
+        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
         var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
         JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
@@ -216,8 +223,8 @@
         var highlighted = text;
         foreach (var kvp in keywordColors)
         {
-            var escaped = Regex.Escape(kvp.Key);
-            var pattern = Regex.IsMatch(kvp.Key, @"\W") ? escaped : $"\\b{escaped}\\b";
+            var escaped = Regex.Escape(kvp.Key.Text);
+            var pattern = (kvp.Key.AllowPartial || Regex.IsMatch(kvp.Key.Text, @"\W")) ? escaped : $"\\b{escaped}\\b";
             var regex = new Regex(pattern, RegexOptions.IgnoreCase);
             highlighted = regex.Replace(highlighted, m => $"<mark style=\"background-color: {kvp.Value};\">{m.Value}</mark>");
         }
