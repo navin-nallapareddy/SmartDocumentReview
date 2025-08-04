@@ -1,112 +1,109 @@
+
 <!DOCTYPE html>
 <html>
 <head>
-  <title>PDF Viewer</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf_viewer.min.css" />
+  <title>PDF Highlighter with OCR</title>
   <style>
-    html, body { margin: 0; height: 100%; }
-    #viewerContainer { position: relative; width: 100%; height: 100%; overflow: auto; }
+    body { font-family: sans-serif; padding: 1rem; }
+    .highlighted { background: yellow; mix-blend-mode: multiply; }
+    #viewerContainer { width: 100%; height: 90vh; overflow: auto; border: 1px solid #ccc; margin-top: 1rem; position: relative; }
     canvas { display: block; margin: auto; }
-    #viewerContainer .textLayer { opacity: 1 !important; }
-    .text-highlight {
-      mix-blend-mode: multiply;
-    }
+    .ocrText { position: absolute; white-space: pre-wrap; color: transparent; font-weight: bold; }
+    .ocrText mark { background: yellow; color: black; }
   </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf_viewer.min.css" />
 </head>
 <body>
+  <h2>PDF Keyword Highlighter with OCR</h2>
+  <input type="file" id="fileInput" accept="application/pdf" />
+  <input type="text" id="keywords" placeholder="Enter keywords, comma-separated" style="width: 300px;" />
+  <button onclick="loadAndHighlight()">Highlight</button>
+
   <div id="viewerContainer"></div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
   <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const file = urlParams.get('file') || '';
-    const page = parseInt(urlParams.get('page') || '1', 10);
-    const highlights = urlParams.getAll('highlight');
-    const colors = urlParams.getAll('color');
-    const partials = urlParams.getAll('partial');
-    const container = document.getElementById('viewerContainer');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+    let uploadedFile = null;
 
-    pdfjsLib.getDocument(file).promise.then(pdf => {
-      pdf.getPage(page).then(p => {
-        const viewport = p.getViewport({ scale: 1.5 });
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        container.appendChild(canvas);
+    document.getElementById('fileInput').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file && file.type === 'application/pdf') {
+        uploadedFile = URL.createObjectURL(file);
+      }
+    });
 
-        const textLayerDiv = document.createElement('div');
-        textLayerDiv.className = 'textLayer';
-        container.appendChild(textLayerDiv);
+    function highlightOCRText(div, keywords) {
+      let content = div.innerText;
+      keywords.forEach(keyword => {
+        const regex = new RegExp(keyword, 'gi');
+        content = content.replace(regex, match => `<mark>${match}</mark>`);
+      });
+      div.innerHTML = content;
+    }
 
-        p.render({ canvasContext: context, viewport });
+    function loadAndHighlight() {
+      if (!uploadedFile) {
+        alert("Please upload a PDF first.");
+        return;
+      }
 
-        p.getTextContent().then(textContent => {
-          const textDivs = [];
-          pdfjsLib.renderTextLayer({
-            textContent,
-            container: textLayerDiv,
-            viewport,
-            textDivs
-          }).promise.then(() => {
-            if (highlights.length > 0) {
-              const spans = textDivs;
-              let fullText = '';
-              const spanRanges = spans.map((span, idx) => {
-                const start = fullText.length;
-                const str = textContent.items[idx].str;
-                fullText += str;
-                return { start, end: fullText.length };
-              });
-              const perSpan = spans.map(() => []);
-              highlights.forEach((h, i) => {
-                const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const allowPartial = partials[i] === 'true';
-                const regex = new RegExp(allowPartial ? escaped : `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu');
-                let match;
-                while ((match = regex.exec(fullText)) !== null) {
-                  const start = match.index;
-                  const end = start + match[0].length;
-                  spanRanges.forEach((range, idx) => {
-                    if (range.start < end && range.end > start) {
-                      const localStart = Math.max(start, range.start) - range.start;
-                      const localEnd = Math.min(end, range.end) - range.start;
-                      perSpan[idx].push({ start: localStart, end: localEnd, color: colors[i] || 'rgba(255,255,0,0.4)' });
-                    }
+      const container = document.getElementById('viewerContainer');
+      container.innerHTML = '';
+      const keywords = document.getElementById('keywords').value.split(',').map(k => k.trim()).filter(Boolean);
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+
+      pdfjsLib.getDocument(uploadedFile).promise.then(pdf => {
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          pdf.getPage(pageNum).then(page => {
+            const scale = 1.5;
+            const viewport = page.getViewport({ scale });
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            container.appendChild(canvas);
+
+            page.render({ canvasContext: context, viewport }).promise.then(() => {
+              page.getTextContent().then(textContent => {
+                if (textContent.items.length > 0) {
+                  const textDiv = document.createElement('div');
+                  textDiv.className = 'ocrText';
+                  textDiv.style.left = '0';
+                  textDiv.style.top = canvas.offsetTop + 'px';
+                  textDiv.style.width = canvas.width + 'px';
+                  textDiv.style.height = canvas.height + 'px';
+                  textDiv.style.fontSize = '12px';
+                  textDiv.innerText = textContent.items.map(i => i.str).join(' ');
+                  highlightOCRText(textDiv, keywords);
+                  container.appendChild(textDiv);
+                } else {
+                  // Run OCR fallback
+                  Tesseract.recognize(
+                    canvas,
+                    'eng',
+                    { logger: m => console.log(m) }
+                  ).then(({ data: { text } }) => {
+                    const textDiv = document.createElement('div');
+                    textDiv.className = 'ocrText';
+                    textDiv.style.left = '0';
+                    textDiv.style.top = canvas.offsetTop + 'px';
+                    textDiv.style.width = canvas.width + 'px';
+                    textDiv.style.height = canvas.height + 'px';
+                    textDiv.style.fontSize = '12px';
+                    textDiv.innerText = text;
+                    highlightOCRText(textDiv, keywords);
+                    container.appendChild(textDiv);
                   });
                 }
               });
-              perSpan.forEach((ranges, idx) => {
-                if (ranges.length === 0) return;
-                ranges.sort((a, b) => a.start - b.start);
-                const merged = [];
-                ranges.forEach(r => {
-                  if (merged.length === 0) {
-                    merged.push({ ...r });
-                  } else {
-                    const last = merged[merged.length - 1];
-                    if (r.start <= last.end) {
-                      last.end = Math.max(last.end, r.end);
-                    } else {
-                      merged.push({ ...r });
-                    }
-                  }
-                });
-                merged.sort((a, b) => b.start - a.start);
-                let text = spans[idx].textContent;
-                merged.forEach(r => {
-                  const before = text.slice(0, r.start);
-                  const middle = text.slice(r.start, r.end);
-                  const after = text.slice(r.end);
-                  text = `${before}<span class="text-highlight" style="background-color: ${r.color}; opacity:0.5;">${middle}</span>${after}`;
-                });
-                spans[idx].innerHTML = text;
-              });
-            }
+            });
           });
-        });
+        }
       });
-    });
+    }
   </script>
 </body>
 </html>
