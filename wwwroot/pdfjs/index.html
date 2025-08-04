@@ -61,9 +61,8 @@
               const perSpan = spans.map(() => []);
               highlights.forEach((h, i) => {
                 const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const hasNonWord = /\W/.test(h);
                 const allowPartial = partials[i] === 'true';
-                const regex = new RegExp((allowPartial || hasNonWord) ? escaped : `\\b${escaped}\\b`, 'gi');
+                const regex = new RegExp(allowPartial ? escaped : `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu');
                 let match;
                 while ((match = regex.exec(fullText)) !== null) {
                   const start = match.index;

@@ -224,9 +224,11 @@
         foreach (var kvp in keywordColors)
         {
             var escaped = Regex.Escape(kvp.Key.Text);
-            var pattern = (kvp.Key.AllowPartial || Regex.IsMatch(kvp.Key.Text, @"\W")) ? escaped : $"\\b{escaped}\\b";
+            var pattern = kvp.Key.AllowPartial
+                ? escaped
+                : $@"(?<![\p{{L}}\p{{N}}]){escaped}(?![\p{{L}}\p{{N}}])";
             var regex = new Regex(pattern, RegexOptions.IgnoreCase);
-            highlighted = regex.Replace(highlighted, m => $"<mark style=\"background-color: {kvp.Value};\">{m.Value}</mark>");
+            highlighted = regex.Replace(highlighted, m => $"<mark style='background-color: {kvp.Value};'>{m.Value}</mark>");
         }
         return (MarkupString)highlighted;
     }

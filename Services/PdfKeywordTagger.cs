@@ -43,10 +43,10 @@ namespace SmartDocumentReview.Services
                 foreach (var keyword in keywords)
                 {
                     var escaped = Regex.Escape(keyword.Text);
-                    // Use word boundaries when partial matches aren't allowed and keyword contains word chars
-                    var pattern = (keyword.AllowPartial || !Regex.IsMatch(keyword.Text, @"\w"))
+                    // Use custom boundaries when partial matches aren't allowed to avoid partial word highlights
+                    var pattern = keyword.AllowPartial
                         ? escaped
-                        : $@"\b{escaped}\b";
+                        : $@"(?<![\p{{L}}\p{{N}}]){escaped}(?![\p{{L}}\p{{N}}])";
 
                     var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
