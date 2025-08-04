@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using iText.Kernel.Pdf;
-using iText.Layout;
+using iTextDocument = iText.Layout.Document;
 using iText.Layout.Element;
 using SmartDocumentReview.Models;
 using SmartDocumentReview.Services;
@@ -14,13 +14,13 @@ namespace SmartDocumentReview.Tests
         private MemoryStream CreatePdf(string text)
         {
             var ms = new MemoryStream();
-            using var writer = new PdfWriter(ms);
-            using var pdf = new PdfDocument(writer);
-            using var doc = new Document(pdf);
-            doc.Add(new Paragraph(text));
-            doc.Close();
-            ms.Position = 0;
-            return ms;
+            using (var writer = new PdfWriter(ms))
+            using (var pdf = new PdfDocument(writer))
+            using (var doc = new iTextDocument(pdf))
+            {
+                doc.Add(new Paragraph(text));
+            }
+            return new MemoryStream(ms.ToArray());
         }
 
         [Fact]
