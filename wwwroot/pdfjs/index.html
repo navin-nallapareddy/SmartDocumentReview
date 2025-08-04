@@ -77,9 +77,23 @@
               });
               perSpan.forEach((ranges, idx) => {
                 if (ranges.length === 0) return;
-                ranges.sort((a, b) => b.start - a.start);
-                let text = spans[idx].textContent;
+                ranges.sort((a, b) => a.start - b.start);
+                const merged = [];
                 ranges.forEach(r => {
+                  if (merged.length === 0) {
+                    merged.push({ ...r });
+                  } else {
+                    const last = merged[merged.length - 1];
+                    if (r.start <= last.end) {
+                      last.end = Math.max(last.end, r.end);
+                    } else {
+                      merged.push({ ...r });
+                    }
+                  }
+                });
+                merged.sort((a, b) => b.start - a.start);
+                let text = spans[idx].textContent;
+                merged.forEach(r => {
                   const before = text.slice(0, r.start);
                   const middle = text.slice(r.start, r.end);
                   const after = text.slice(r.end);
