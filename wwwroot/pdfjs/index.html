@@ -50,7 +50,8 @@
               textLayerDiv.querySelectorAll('span').forEach(span => {
                 const text = span.textContent;
                 highlights.forEach((h, i) => {
-                  const regex = new RegExp(h, 'gi');
+                  const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, '\$&');
+                  const regex = new RegExp(escaped, 'gi');
                   let match;
                   while ((match = regex.exec(text)) !== null) {
                     const range = document.createRange();
