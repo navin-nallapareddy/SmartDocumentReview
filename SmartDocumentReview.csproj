@@ -19,6 +19,12 @@
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="7.0.0" />
     <PackageReference Include="itext7" Version="7.2.5" />
+    </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="SmartDocumentReview.Tests/**" />
+    <EmbeddedResource Remove="SmartDocumentReview.Tests/**" />
+    <None Remove="SmartDocumentReview.Tests/**" />
   </ItemGroup>
 
-</Project>
+  </Project>
