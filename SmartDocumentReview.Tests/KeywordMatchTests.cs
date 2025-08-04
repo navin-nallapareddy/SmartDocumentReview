@@ -15,8 +15,9 @@ namespace SmartDocumentReview.Tests
         {
             var ms = new MemoryStream();
             using var writer = new PdfWriter(ms);
+            writer.SetCloseStream(false);
             using var pdf = new PdfDocument(writer);
-            using var doc = new Document(pdf);
+            using var doc = new iText.Layout.Document(pdf);
             doc.Add(new Paragraph(text));
             doc.Close();
             ms.Position = 0;

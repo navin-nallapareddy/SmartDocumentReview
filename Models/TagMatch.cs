@@ -13,5 +13,9 @@ namespace SmartDocumentReview.Models
         public DateTime CreatedAt { get; set; }
         public int DocumentId { get; set; }
         public int PageNumber { get; set; }
+        public float PageX { get; set; }
+        public float PageY { get; set; }
+        public float Width { get; set; }
+        public float Height { get; set; }
     }
 }
