@@ -2,6 +2,8 @@
 @inject NavigationManager Navigation
 @inject SmartDocumentReview.Services.ResultStateService ResultStateService
 @inject IJSRuntime JS
+@using System.Linq
+@using System.Text.RegularExpressions
 
 <h3>Matched Results</h3>
 
@@ -11,11 +13,11 @@
         @foreach (var match in ResultStateService.Matches)
         {
             <div style="margin-bottom: 1.5rem;">
-                <h4 @onclick="() => LoadPdf(match.PageNumber, match.Keyword)" 
+                <h4 @onclick="() => LoadPdf(match.PageNumber)"
                     style="cursor: pointer; color: blue; text-decoration: underline;">
                     @match.SectionTitle
                 </h4>
-                <p>@(HighlightKeyword(match.MatchedText, match.Keyword))</p>
+                <p>@(HighlightKeywords(match.MatchedText))</p>
             </div>
         }
     </div>
@@ -27,27 +29,39 @@
 </div>
 
 @code {
+    private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
+    private Dictionary<string, string> keywordColors = new();
+
     protected override void OnInitialized()
     {
+        var keywords = ResultStateService.Matches.Select(m => m.Keyword).Distinct().ToList();
+        keywordColors = keywords.Select((k, i) => new { k, i }).ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
+
         // Load first match by default
         if (ResultStateService.Matches.Count > 0)
         {
             var first = ResultStateService.Matches[0];
-            LoadPdf(first.PageNumber, first.Keyword);
+            LoadPdf(first.PageNumber);
         }
     }
 
-    void LoadPdf(int page, string keyword)
+    void LoadPdf(int page)
     {
         var file = "/uploads/latest.pdf";
-        var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&highlight={keyword}";
+        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key)}&color={Uri.EscapeDataString(kvp.Value)}"));
+        var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
         JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
 
-    MarkupString HighlightKeyword(string text, string keyword)
+    MarkupString HighlightKeywords(string text)
     {
-        if (string.IsNullOrWhiteSpace(keyword)) return (MarkupString)text;
-        var highlighted = text.Replace(keyword, $"<mark>{keyword}</mark>", StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text)) return (MarkupString)text;
+        var highlighted = text;
+        foreach (var kvp in keywordColors)
+        {
+            var regex = new Regex(Regex.Escape(kvp.Key), RegexOptions.IgnoreCase);
+            highlighted = regex.Replace(highlighted, m => $"<mark style=\"background-color: {kvp.Value};\">{m.Value}</mark>");
+        }
         return (MarkupString)highlighted;
     }
 }

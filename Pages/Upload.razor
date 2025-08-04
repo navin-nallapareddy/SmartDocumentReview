@@ -5,6 +5,7 @@
 @using SmartDocumentReview.Data
 @using System.IO
 @using System.Text.RegularExpressions
+@using System.Linq
 @inject AuthService AuthService
 @inject PdfKeywordTagger Tagger
 @inject TagDbContext Db
@@ -70,11 +71,11 @@
             @foreach (var match in MatchedKeywords)
             {
                 <div style="margin-bottom: 1.5rem;">
-                    <h4 @onclick="() => LoadPdf(match.PageNumber, match.Keyword)"
+                    <h4 @onclick="() => LoadPdf(match.PageNumber)"
                         style="cursor: pointer; color: blue; text-decoration: underline;">
                         @match.SectionTitle
                     </h4>
-                    <p>@(HighlightKeyword(match.MatchedText, match.Keyword))</p>
+                    <p>@(HighlightKeywords(match.MatchedText))</p>
                 </div>
             }
         </div>
@@ -191,7 +192,7 @@
 
             if (MatchedKeywords.Count > 0)
             {
-                LoadPdf(MatchedKeywords[0].PageNumber, MatchedKeywords[0].Keyword);
+                LoadPdf(MatchedKeywords[0].PageNumber);
             }
         }
         catch (Exception ex)
@@ -207,20 +208,23 @@
         }
     }
 
-    void LoadPdf(int page, string keyword)
+    void LoadPdf(int page)
     {
         var file = "/uploads/latest.pdf";
-        var color = keywordColors.ContainsKey(keyword) ? keywordColors[keyword] : "yellow";
-        var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&highlight={Uri.EscapeDataString(keyword)}&color={Uri.EscapeDataString(color)}";
+        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key)}&color={Uri.EscapeDataString(kvp.Value)}"));
+        var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
         JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
 
-    MarkupString HighlightKeyword(string text, string keyword)
+    MarkupString HighlightKeywords(string text)
     {
-        if (string.IsNullOrWhiteSpace(keyword)) return (MarkupString)text;
-        var color = keywordColors.ContainsKey(keyword) ? keywordColors[keyword] : "yellow";
-        var regex = new Regex(Regex.Escape(keyword), RegexOptions.IgnoreCase);
-        var highlighted = regex.Replace(text, m => $"<mark style=\"background-color: {color};\">{m.Value}</mark>");
+        if (string.IsNullOrWhiteSpace(text)) return (MarkupString)text;
+        var highlighted = text;
+        foreach (var kvp in keywordColors)
+        {
+            var regex = new Regex(Regex.Escape(kvp.Key), RegexOptions.IgnoreCase);
+            highlighted = regex.Replace(highlighted, m => $"<mark style=\"background-color: {kvp.Value};\">{m.Value}</mark>");
+        }
         return (MarkupString)highlighted;
     }
 }
