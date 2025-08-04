@@ -8,7 +8,9 @@
     #viewerContainer { position: relative; width: 100%; height: 100%; overflow: auto; }
     canvas { display: block; margin: auto; }
     #viewerContainer .textLayer { opacity: 1 !important; }
-    .text-highlight { background-color: yellow; }
+    .text-highlight {
+      mix-blend-mode: multiply;
+    }
   </style>
 </head>
 <body>
@@ -51,7 +53,10 @@
                 highlights.forEach((h, i) => {
                   const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, '\$&');
                   const regex = new RegExp(escaped, 'gi');
-                  html = html.replace(regex, m => `<span class="text-highlight" style="background-color: ${colors[i] || 'yellow'};">${m}</span>`);
+                  html = html.replace(
+                    regex,
+                    m => `<span class="text-highlight" style="background-color: ${colors[i] || 'rgba(255,255,0,0.4)'}; opacity: 0.5;">${m}</span>`
+                  );
                 });
                 span.innerHTML = html;
               });
