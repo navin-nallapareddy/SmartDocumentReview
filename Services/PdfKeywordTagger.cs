@@ -23,17 +23,21 @@ namespace SmartDocumentReview.Services
                 foreach (var keyword in keywords)
                 {
                     var escaped = Regex.Escape(keyword.Text);
-                    var corePattern = (keyword.AllowPartial || Regex.IsMatch(keyword.Text, @"\W"))
+                    var pattern = (keyword.AllowPartial || Regex.IsMatch(keyword.Text, @"\W"))
                         ? escaped
-                        : $"\\b{escaped}\\b";
-                    var regex = new Regex($@"(.{{0,60}}{corePattern}.{{0,60}})", RegexOptions.IgnoreCase);
+                        : $@"\b{escaped}\b";
+                    var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
                     foreach (Match match in regex.Matches(text))
                     {
+                        var start = Math.Max(0, match.Index - 60);
+                        var end = Math.Min(text.Length, match.Index + match.Length + 60);
+                        var context = text.Substring(start, end - start);
+
                         matches.Add(new TagMatch
                         {
                             Keyword = keyword.Text,
                             SectionTitle = sectionTitle,
-                            MatchedText = match.Value,
+                            MatchedText = context,
                             CreatedBy = createdBy,
                             CreatedAt = DateTime.UtcNow,
                             PageNumber = i
