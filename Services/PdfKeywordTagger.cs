@@ -52,14 +52,24 @@ namespace SmartDocumentReview.Services
 
                     foreach (Match match in regex.Matches(pageText))
                     {
-                        // Get the bounding box location from spans
-                        IPdfTextLocation? loc = null;
+                        // Get the bounding box by unioning all span rectangles that overlap the match range
+                        Rectangle rect = new Rectangle(0, 0, 0, 0);
                         if (spans.Count > 0)
                         {
-                            var span = spans.FirstOrDefault(s => match.Index >= s.start && match.Index < s.end);
-                            loc = span.loc;
+                            var relevant = spans
+                                .Where(s => s.start < match.Index + match.Length && s.end > match.Index)
+                                .Select(s => s.loc.GetRectangle())
+                                .ToList();
+
+                            if (relevant.Count > 0)
+                            {
+                                var x1 = relevant.Min(r => r.GetX());
+                                var y1 = relevant.Min(r => r.GetY());
+                                var x2 = relevant.Max(r => r.GetX() + r.GetWidth());
+                                var y2 = relevant.Max(r => r.GetY() + r.GetHeight());
+                                rect = new Rectangle(x1, y1, x2 - x1, y2 - y1);
+                            }
                         }
-                        Rectangle rect = loc?.GetRectangle() ?? new Rectangle(0, 0, 0, 0);
 
                         // Extract matched context (±60 characters around the match)
                         var start = Math.Max(0, match.Index - 60);
