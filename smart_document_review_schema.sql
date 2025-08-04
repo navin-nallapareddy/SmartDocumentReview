@@ -31,7 +31,6 @@ CREATE TABLE TagMatches (
     PageX REAL,
     PageY REAL,
     Width REAL,
-    Height REAL,
     CreatedBy TEXT NOT NULL,
     CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UpdatedBy TEXT,

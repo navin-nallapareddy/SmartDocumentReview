@@ -43,7 +43,8 @@ namespace SmartDocumentReview.Services
                 foreach (var keyword in keywords)
                 {
                     var escaped = Regex.Escape(keyword.Text);
-                    var pattern = (keyword.AllowPartial || Regex.IsMatch(keyword.Text, @"\w"))
+                    // Use word boundaries when partial matches aren't allowed and keyword contains word chars
+                    var pattern = (keyword.AllowPartial || !Regex.IsMatch(keyword.Text, @"\w"))
                         ? escaped
                         : $@"\b{escaped}\b";
 
@@ -75,8 +76,7 @@ namespace SmartDocumentReview.Services
                             PageNumber = i,
                             PageX = rect.GetX(),
                             PageY = rect.GetY(),
-                            Width = rect.GetWidth(),
-                            Height = rect.GetHeight()
+                            Width = rect.GetWidth()
                         });
                     }
                 }
