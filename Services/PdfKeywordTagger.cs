@@ -17,7 +17,11 @@ namespace SmartDocumentReview.Services
             for (int i = 1; i <= pdf.GetNumberOfPages(); i++)
             {
                 var page = pdf.GetPage(i);
-                var text = PdfTextExtractor.GetTextFromPage(page);
+                var strategy = new TextWithPositionExtractionStrategy();
+                var processor = new PdfCanvasProcessor(strategy);
+                processor.ProcessPageContent(page);
+                var text = strategy.GetResultantText();
+                var characters = strategy.Characters;
                 var sectionTitle = $"Page {i}";
 
                 foreach (var keyword in keywords)
@@ -26,17 +30,28 @@ namespace SmartDocumentReview.Services
                     var corePattern = (keyword.AllowPartial || Regex.IsMatch(keyword.Text, @"\W"))
                         ? escaped
                         : $"\\b{escaped}\\b";
-                    var regex = new Regex($@"(.{{0,60}}{corePattern}.{{0,60}})", RegexOptions.IgnoreCase);
+                    var regex = new Regex(corePattern, RegexOptions.IgnoreCase);
+
                     foreach (Match match in regex.Matches(text))
                     {
+                        var start = Math.Max(0, match.Index - 60);
+                        var length = Math.Min(text.Length - start, match.Length + 120);
+                        var snippet = text.Substring(start, length);
+                        var positions = new List<PdfTextPosition>();
+                        for (int idx = match.Index; idx < match.Index + match.Length && idx < characters.Count; idx++)
+                        {
+                            positions.Add(characters[idx].Position);
+                        }
+
                         matches.Add(new TagMatch
                         {
                             Keyword = keyword.Text,
                             SectionTitle = sectionTitle,
-                            MatchedText = match.Value,
+                            MatchedText = snippet,
                             CreatedBy = createdBy,
                             CreatedAt = DateTime.UtcNow,
-                            PageNumber = i
+                            PageNumber = i,
+                            Positions = positions
                         });
                     }
                 }

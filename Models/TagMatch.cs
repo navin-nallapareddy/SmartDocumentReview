@@ -13,5 +13,7 @@ namespace SmartDocumentReview.Models
         public DateTime CreatedAt { get; set; }
         public int DocumentId { get; set; }
         public int PageNumber { get; set; }
+        [NotMapped]
+        public List<PdfTextPosition> Positions { get; set; } = new();
     }
 }
