@@ -21,10 +21,12 @@
         <EditForm Model="this" OnValidSubmit="HandleValidSubmit">
             <div class="row justify-content-center g-3 text-center">
                 <!-- Upload File -->
-<div class="col-auto d-flex align-items-center gap-5">
-    <label class="form-label fw-semibold mb-0">Upload PDF:</label>
-    <InputFile class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
+
+<div class="col-auto d-flex align-items-center gap-0">
+  <label for="pdfUpload" class="form-label fw-bold mb-0">Upload PDF:</label>
+  <InputFile id="pdfUpload" class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
 </div>
+
 
                 <!-- Keywords -->
                 <div class="col-auto d-flex flex-column align-items-center">
