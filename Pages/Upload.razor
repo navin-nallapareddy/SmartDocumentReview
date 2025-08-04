@@ -21,14 +21,14 @@
         <EditForm Model="this" OnValidSubmit="HandleValidSubmit">
             <div class="row justify-content-center g-3 text-center">
                 <!-- Upload File -->
-                <div class="col-auto d-flex flex-column align-items-center">
-                    <label class="form-label fw-semibold">Upload PDF:</label>
-                    <InputFile class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
-                </div>
+<div class="col-auto d-flex align-items-center gap-2">
+    <label class="form-label fw-semibold mb-0">Upload PDF:</label>
+    <InputFile class="form-control" OnChange="HandleFileSelected" accept=".pdf" />
+</div>
 
                 <!-- Keywords -->
                 <div class="col-auto d-flex flex-column align-items-center">
-                    <label class="form-label fw-semibold">Enter up to 5 keywords (one per line):</label>
+                    <label class="form-label fw-semibold">Enter keywords (one per line):</label>
                     <InputTextArea class="form-control" style="width: 250px;" @bind-Value="RawKeywordInput" Rows="3" />
                 </div>
 
@@ -86,14 +86,6 @@
         </div>
     </div>
 }
-
-@if (!IsProcessing && MatchedKeywords.Count == 0 && uploadedFile != null)
-{
-    <div class="alert alert-info mt-4 text-center">
-        No matching keywords found in the uploaded document.
-    </div>
-}
-
 
 @code {
     private IBrowserFile? uploadedFile;
