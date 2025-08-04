@@ -15,12 +15,16 @@ namespace SmartDocumentReview.Tests
         {
             var ms = new MemoryStream();
             using (var writer = new PdfWriter(ms))
-            using (var pdf = new PdfDocument(writer))
-            using (var doc = new iTextDocument(pdf))
             {
-                doc.Add(new Paragraph(text));
+                writer.SetCloseStream(false);
+                using (var pdf = new PdfDocument(writer))
+                using (var doc = new iText.Layout.Document(pdf))
+                {
+                    doc.Add(new Paragraph(text));
+                }
             }
-            return new MemoryStream(ms.ToArray());
+            ms.Position = 0;
+            return ms;
         }
 
         [Fact]
