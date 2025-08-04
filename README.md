@@ -9,6 +9,7 @@ An AI-assisted web tool to extract and highlight relevant sections in PDF docume
 - Basic login (testuser / Test@123)
 - Audit fields: CreatedBy, CreatedAt, etc.
 - Built with Blazor Server + C# + PostgreSQL-ready
+- Prefix a keyword with `*` to match inside larger words (e.g. `*bank` matches "bankruptcy")
 
 ## Getting Started
 

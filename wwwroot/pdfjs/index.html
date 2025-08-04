@@ -22,6 +22,7 @@
     const page = parseInt(urlParams.get('page') || '1', 10);
     const highlights = urlParams.getAll('highlight');
     const colors = urlParams.getAll('color');
+    const partials = urlParams.getAll('partial');
     const container = document.getElementById('viewerContainer');
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
 
@@ -61,7 +62,8 @@
               highlights.forEach((h, i) => {
                 const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const hasNonWord = /\W/.test(h);
-                const regex = new RegExp(hasNonWord ? escaped : `\\b${escaped}\\b`, 'gi');
+                const allowPartial = partials[i] === 'true';
+                const regex = new RegExp((allowPartial || hasNonWord) ? escaped : `\\b${escaped}\\b`, 'gi');
                 let match;
                 while ((match = regex.exec(fullText)) !== null) {
                   const start = match.index;

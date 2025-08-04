@@ -7,7 +7,7 @@ namespace SmartDocumentReview.Services
 {
     public class PdfKeywordTagger
     {
-        public List<TagMatch> ProcessPdf(Stream pdfStream, List<string> keywords, string createdBy)
+        public List<TagMatch> ProcessPdf(Stream pdfStream, List<Keyword> keywords, string createdBy)
         {
             var matches = new List<TagMatch>();
 
@@ -22,13 +22,16 @@ namespace SmartDocumentReview.Services
 
                 foreach (var keyword in keywords)
                 {
-                    var pattern = Regex.Escape(keyword);
-                    var regex = new Regex($@"(.{{0,60}}{pattern}.{{0,60}})", RegexOptions.IgnoreCase);
+                    var escaped = Regex.Escape(keyword.Text);
+                    var corePattern = (keyword.AllowPartial || Regex.IsMatch(keyword.Text, @"\W"))
+                        ? escaped
+                        : $"\\b{escaped}\\b";
+                    var regex = new Regex($@"(.{{0,60}}{corePattern}.{{0,60}})", RegexOptions.IgnoreCase);
                     foreach (Match match in regex.Matches(text))
                     {
                         matches.Add(new TagMatch
                         {
-                            Keyword = keyword,
+                            Keyword = keyword.Text,
                             SectionTitle = sectionTitle,
                             MatchedText = match.Value,
                             CreatedBy = createdBy,
