@@ -78,29 +78,28 @@
               });
               perSpan.forEach((ranges, idx) => {
                 if (ranges.length === 0) return;
-                ranges.sort((a, b) => a.start - b.start);
-                const merged = [];
+                const text = spans[idx].textContent;
+                const charColors = new Array(text.length).fill(null);
+
                 ranges.forEach(r => {
-                  if (merged.length === 0) {
-                    merged.push({ ...r });
-                  } else {
-                    const last = merged[merged.length - 1];
-                    if (r.start <= last.end) {
-                      last.end = Math.max(last.end, r.end);
-                    } else {
-                      merged.push({ ...r });
-                    }
+                  for (let i = r.start; i < r.end && i < charColors.length; i++) {
+                    charColors[i] = r.color || 'rgba(255,255,0,0.4)';
                   }
                 });
-                merged.sort((a, b) => b.start - a.start);
-                let text = spans[idx].textContent;
-                merged.forEach(r => {
-                  const before = text.slice(0, r.start);
-                  const middle = text.slice(r.start, r.end);
-                  const after = text.slice(r.end);
-                  text = `${before}<span class="text-highlight" style="background-color: ${r.color}; opacity:0.5;">${middle}</span>${after}`;
-                });
-                spans[idx].innerHTML = text;
+
+                let result = '';
+                let current = null;
+                for (let i = 0; i < text.length; i++) {
+                  const color = charColors[i];
+                  if (color !== current) {
+                    if (current !== null) result += '</span>';
+                    if (color !== null) result += `<span class="text-highlight" style="background-color: ${color}; opacity:0.5;">`;
+                    current = color;
+                  }
+                  result += text[i];
+                }
+                if (current !== null) result += '</span>';
+                spans[idx].innerHTML = result;
               });
             }
           });
