@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
-using iText.Kernel.Geom;
-using iText.Kernel.Pdf;
-using iText.Kernel.Pdf.Canvas.Parser;
-using iText.Kernel.Pdf.Canvas.Parser.Listener;
+using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
 using SmartDocumentReview.Models;
 
 namespace SmartDocumentReview.Services
@@ -17,27 +15,25 @@ namespace SmartDocumentReview.Services
         {
             var matches = new List<TagMatch>();
 
-            using var reader = new PdfReader(pdfStream);
-            using var pdf = new PdfDocument(reader);
+            using var pdf = PdfDocument.Open(pdfStream);
 
-            for (int i = 1; i <= pdf.GetNumberOfPages(); i++)
+            for (int i = 1; i <= pdf.NumberOfPages; i++)
             {
                 var page = pdf.GetPage(i);
-                var strategy = new LocationTextExtractionStrategy();
-                var pageText = PdfTextExtractor.GetTextFromPage(page, strategy);
+                var letters = page.Letters;
 
-                var method = typeof(LocationTextExtractionStrategy).GetMethod("GetResultantLocations", BindingFlags.Instance | BindingFlags.NonPublic);
-                var locations = method?.Invoke(strategy, null) as IEnumerable<IPdfTextLocation>;
-                var locationList = locations?.ToList() ?? new List<IPdfTextLocation>();
-                var spans = new List<(int start, int end, IPdfTextLocation loc)>();
+                var pageTextBuilder = new StringBuilder();
+                var spans = new List<(int start, int end, Letter letter)>();
                 int offset = 0;
-                foreach (var loc in locationList)
+                foreach (var letter in letters)
                 {
-                    var textLoc = loc.GetText();
-                    spans.Add((offset, offset + textLoc.Length, loc));
-                    offset += textLoc.Length;
+                    var text = letter.Value.ToString();
+                    pageTextBuilder.Append(text);
+                    spans.Add((offset, offset + text.Length, letter));
+                    offset += text.Length;
                 }
 
+                var pageText = pageTextBuilder.ToString();
                 var sectionTitle = $"Page {i}";
 
                 foreach (var keyword in keywords)
@@ -52,23 +48,18 @@ namespace SmartDocumentReview.Services
 
                     foreach (Match match in regex.Matches(pageText))
                     {
-                        // Get the bounding box by unioning all span rectangles that overlap the match range
-                        Rectangle rect = new Rectangle(0, 0, 0, 0);
-                        if (spans.Count > 0)
-                        {
-                            var relevant = spans
-                                .Where(s => s.start < match.Index + match.Length && s.end > match.Index)
-                                .Select(s => s.loc.GetRectangle())
-                                .ToList();
+                        double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+                        var relevant = spans
+                            .Where(s => s.start < match.Index + match.Length && s.end > match.Index)
+                            .Select(s => s.letter.GlyphRectangle)
+                            .ToList();
 
-                            if (relevant.Count > 0)
-                            {
-                                var x1 = relevant.Min(r => r.GetX());
-                                var y1 = relevant.Min(r => r.GetY());
-                                var x2 = relevant.Max(r => r.GetX() + r.GetWidth());
-                                var y2 = relevant.Max(r => r.GetY() + r.GetHeight());
-                                rect = new Rectangle(x1, y1, x2 - x1, y2 - y1);
-                            }
+                        if (relevant.Count > 0)
+                        {
+                            x1 = relevant.Min(r => r.Left);
+                            y1 = relevant.Min(r => r.Bottom);
+                            x2 = relevant.Max(r => r.Right);
+                            y2 = relevant.Max(r => r.Top);
                         }
 
                         // Extract matched context (±60 characters around the match)
@@ -84,9 +75,9 @@ namespace SmartDocumentReview.Services
                             CreatedBy = createdBy,
                             CreatedAt = DateTime.UtcNow,
                             PageNumber = i,
-                            PageX = rect.GetX(),
-                            PageY = rect.GetY(),
-                            Width = rect.GetWidth()
+                            PageX = (float)x1,
+                            PageY = (float)y1,
+                            Width = (float)(x2 - x1)
                         });
                     }
                 }
