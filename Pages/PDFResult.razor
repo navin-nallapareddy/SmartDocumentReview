@@ -3,6 +3,7 @@
 @inject SmartDocumentReview.Services.ResultStateService ResultStateService
 @inject IJSRuntime JS
 @using System.Linq
+@using System.Text
 @using System.Text.RegularExpressions
 @using SmartDocumentReview.Models
 
@@ -67,16 +68,39 @@
     MarkupString HighlightKeywords(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return (MarkupString)text;
-        var highlighted = text;
+
+        var ranges = new List<(int start, int end, string color)>();
+
         foreach (var kvp in keywordColors)
         {
             var escaped = Regex.Escape(kvp.Key.Text);
             var pattern = kvp.Key.AllowPartial
                 ? escaped
                 : $@"(?<![\p{{L}}\p{{N}}]){escaped}(?![\p{{L}}\p{{N}}])";
-            var regex = new Regex(pattern, RegexOptions.IgnoreCase);
-            highlighted = regex.Replace(highlighted, m => $"<mark style='background-color: {kvp.Value};'>{m.Value}</mark>");
+            foreach (Match match in Regex.Matches(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                ranges.Add((match.Index, match.Index + match.Length, kvp.Value));
+            }
         }
-        return (MarkupString)highlighted;
+
+        if (ranges.Count == 0) return (MarkupString)text;
+
+        var ordered = ranges
+            .OrderBy(r => r.start)
+            .ThenByDescending(r => r.end - r.start)
+            .ToList();
+
+        var sb = new StringBuilder();
+        int last = 0;
+        foreach (var r in ordered)
+        {
+            if (r.start < last) continue; // skip overlaps
+            sb.Append(text[last..r.start]);
+            sb.Append($"<mark style='background-color: {r.color};'>{text[r.start..r.end]}</mark>");
+            last = r.end;
+        }
+        sb.Append(text[last..]);
+
+        return (MarkupString)sb.ToString();
     }
 }
