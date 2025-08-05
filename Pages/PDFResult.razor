@@ -14,7 +14,7 @@
         @foreach (var match in ResultStateService.Matches)
         {
             <div style="margin-bottom: 1.5rem;">
-                <h4 @onclick="() => LoadPdf(match.PageNumber)"
+                <h4 @onclick="() => LoadPdfAsync(match.PageNumber)"
                     style="cursor: pointer; color: blue; text-decoration: underline;">
                     @match.SectionTitle
                 </h4>
@@ -32,26 +32,36 @@
 @code {
     private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
     private Dictionary<Keyword, string> keywordColors = new();
+    private int? _pendingPage;
 
     protected override void OnInitialized()
     {
         var keywords = ResultStateService.Keywords;
         keywordColors = keywords.Select((k, i) => new { k, i }).ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
 
-        // Load first match by default
+        // Load first match by default after render
         if (ResultStateService.Matches.Count > 0)
         {
             var first = ResultStateService.Matches[0];
-            LoadPdf(first.PageNumber);
+            _pendingPage = first.PageNumber;
         }
     }
 
-    void LoadPdf(int page)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingPage.HasValue)
+        {
+            await LoadPdfAsync(_pendingPage.Value);
+            _pendingPage = null;
+        }
+    }
+
+    async Task LoadPdfAsync(int page)
     {
         var file = "/uploads/latest.pdf";
         var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
         var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
-        JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
+        await JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
 
     MarkupString HighlightKeywords(string text)
