@@ -10,6 +10,7 @@ An AI-assisted web tool to extract and highlight relevant sections in PDF docume
 - Audit fields: CreatedBy, CreatedAt, etc.
 - Built with Blazor Server + C# + PostgreSQL-ready
 - Prefix a keyword with `*` to match inside larger words (e.g. `*bank` matches "bankruptcy")
+- Falls back to [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for scanned PDFs (requires `tesseract-ocr` and `poppler-utils`)
 
 ## Getting Started
 

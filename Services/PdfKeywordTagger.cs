@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
+using System.IO;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using SmartDocumentReview.Models;
@@ -15,7 +17,15 @@ namespace SmartDocumentReview.Services
         {
             var matches = new List<TagMatch>();
 
-            using var pdf = PdfDocument.Open(pdfStream);
+            // Copy the incoming stream so we can reuse it for OCR if needed
+            using var memory = new MemoryStream();
+            pdfStream.CopyTo(memory);
+            var bytes = memory.ToArray();
+            var tempPdf = Path.GetTempFileName();
+            File.WriteAllBytes(tempPdf, bytes);
+            memory.Position = 0;
+
+            using var pdf = PdfDocument.Open(memory);
 
             for (int i = 1; i <= pdf.NumberOfPages; i++)
             {
@@ -34,6 +44,13 @@ namespace SmartDocumentReview.Services
                 }
 
                 var pageText = pageTextBuilder.ToString();
+
+                // If no text was extracted, fall back to Tesseract OCR
+                if (string.IsNullOrWhiteSpace(pageText))
+                {
+                    pageText = RunOcr(tempPdf, i);
+                    spans.Clear();
+                }
                 var sectionTitle = $"Page {i}";
 
                 foreach (var keyword in keywords)
@@ -85,7 +102,65 @@ namespace SmartDocumentReview.Services
                 }
             }
 
+            File.Delete(tempPdf);
             return matches;
+        }
+
+        private string RunOcr(string pdfPath, int pageNumber)
+        {
+            try
+            {
+                var tempDir = Path.GetTempPath();
+                var baseName = Path.Combine(tempDir, $"ocr_page_{Guid.NewGuid()}");
+
+                var pdftoppm = new ProcessStartInfo
+                {
+                    FileName = "pdftoppm",
+                    Arguments = $"-f {pageNumber} -l {pageNumber} -png -singlefile \"{pdfPath}\" \"{baseName}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using (var proc = Process.Start(pdftoppm))
+                {
+                    proc?.WaitForExit();
+                }
+
+                var imagePath = baseName + ".png";
+                if (!File.Exists(imagePath))
+                {
+                    return string.Empty;
+                }
+
+                string text = string.Empty;
+                var tesseract = new ProcessStartInfo
+                {
+                    FileName = "tesseract",
+                    Arguments = $"\"{imagePath}\" stdout",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using (var proc = Process.Start(tesseract))
+                {
+                    if (proc != null)
+                    {
+                        text = proc.StandardOutput.ReadToEnd();
+                        proc.WaitForExit();
+                    }
+                }
+
+                File.Delete(imagePath);
+                return text;
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
     }
 }
