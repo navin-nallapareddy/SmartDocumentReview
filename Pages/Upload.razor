@@ -74,7 +74,7 @@
             @foreach (var match in MatchedKeywords)
             {
                 <div style="margin-bottom: 1.5rem;">
-                    <h4 @onclick="() => LoadPdf(match.PageNumber)"
+                    <h4 @onclick="() => LoadPdfAsync(match.PageNumber)"
                         style="cursor: pointer; color: blue; text-decoration: underline;">
                         @match.SectionTitle
                     </h4>
@@ -100,6 +100,7 @@
     public List<TagMatch> MatchedKeywords { get; set; } = new();
     private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
     private Dictionary<Keyword, string> keywordColors = new();
+    private int? _pendingPage;
 
     private readonly System.Diagnostics.Stopwatch _stopwatch = new();
     private System.Timers.Timer? _timer;
@@ -193,7 +194,7 @@
 
             if (MatchedKeywords.Count > 0)
             {
-                LoadPdf(MatchedKeywords[0].PageNumber);
+                _pendingPage = MatchedKeywords[0].PageNumber;
             }
         }
         catch (Exception ex)
@@ -209,12 +210,21 @@
         }
     }
 
-    void LoadPdf(int page)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingPage.HasValue)
+        {
+            await LoadPdfAsync(_pendingPage.Value);
+            _pendingPage = null;
+        }
+    }
+
+    async Task LoadPdfAsync(int page)
     {
         var file = "/uploads/latest.pdf";
         var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
         var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
-        JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
+        await JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
 
     MarkupString HighlightKeywords(string text)
