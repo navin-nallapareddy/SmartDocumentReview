@@ -39,10 +39,12 @@ namespace SmartDocumentReview.Services
                 foreach (var keyword in keywords)
                 {
                     var escaped = Regex.Escape(keyword.Text);
-                    // Use custom boundaries when partial matches aren't allowed to avoid partial word highlights
+                    // Use custom boundaries when partial matches aren't allowed to avoid partial word highlights.
+                    // Treat common word punctuation like apostrophes, hyphens and underscores as part of the word
+                    // to prevent matches such as "bank" in "bank's" when whole-word matching is requested.
                     var pattern = keyword.AllowPartial
                         ? escaped
-                        : $@"(?<![\p{{L}}\p{{N}}]){escaped}(?![\p{{L}}\p{{N}}])";
+                        : $@"(?<![\p{{L}}\p{{N}}_\u2019'-]){escaped}(?![\p{{L}}\p{{N}}_\u2019'-])";
 
                     var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 

@@ -38,6 +38,16 @@ namespace SmartDocumentReview.Tests
         }
 
         [Fact]
+        public void DoesNotMatchWhenFollowedByApostropheInWholeWordSearch()
+        {
+            using var pdf = CreatePdf("bank's");
+            var tagger = new PdfKeywordTagger();
+            var keywords = new List<Keyword> { new Keyword("bank", false) };
+            var matches = tagger.ProcessPdf(pdf, keywords, "tester");
+            Assert.Empty(matches);
+        }
+
+        [Fact]
         public void MatchesInsideWordWhenPartialAllowed()
         {
             using var pdf = CreatePdf("bankruptcy");
