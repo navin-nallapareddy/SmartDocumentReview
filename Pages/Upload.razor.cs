@@ -1,0 +1,102 @@
+// File: Pages/Upload.razor.cs
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Components;
+using SmartDocumentReview.Shared;  // for KeywordRegex
+using SmartDocumentReview.Models;  // for Keyword
+
+namespace SmartDocumentReview.Pages
+{
+    public partial class Upload
+    {
+        private sealed record Hit(int Start, int End, Keyword Keyword)
+        {
+            public int Length => End - Start;
+        }
+
+        /// <summary>
+        /// Builds safe, accurate multi-keyword highlights for the given text.
+        /// Call this from your .razor markup.
+        /// </summary>
+        protected MarkupString BuildHighlights(string text, IEnumerable<Keyword> keywords, Func<Keyword, string> colorForKeyword)
+        {
+            if (string.IsNullOrEmpty(text) || keywords is null)
+                return new MarkupString(HtmlEncoder.Default.Encode(text ?? string.Empty));
+
+            var kwList = keywords.ToList();
+            var wholeKw = kwList.Where(k => !k.AllowPartial).ToList();
+            var partKw  = kwList.Where(k =>  k.AllowPartial).ToList();
+
+            var matches = new List<Hit>();
+
+            if (wholeKw.Count > 0)
+            {
+                var rxWhole = KeywordRegex.BuildWholeWordRegex(wholeKw.Select(k => k.Text));
+                CollectMatches(rxWhole, text, wholeKw, matches);
+            }
+            if (partKw.Count > 0)
+            {
+                var rxPart = KeywordRegex.BuildPartialRegex(partKw.Select(k => k.Text));
+                CollectMatches(rxPart, text, partKw, matches);
+            }
+
+            // Sort: earliest start first; for ties, prefer longer matches
+            var ordered = matches
+                .OrderBy(m => m.Start)
+                .ThenByDescending(m => m.Length)
+                .ToList();
+
+            // Deduplicate identical spans; skip true overlaps
+            var canonical = new List<Hit>();
+            var seen = new HashSet<(int s, int e)>();
+            int lastEnd = -1;
+
+            foreach (var m in ordered)
+            {
+                if (!seen.Add((m.Start, m.End))) continue;
+                if (m.Start < lastEnd) continue;
+                canonical.Add(m);
+                lastEnd = m.End;
+            }
+
+            // Build the final HTML
+            var sb = new StringBuilder(text.Length + canonical.Count * 40);
+            int cursor = 0;
+
+            foreach (var m in canonical)
+            {
+                if (cursor < m.Start)
+                    sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor, m.Start - cursor)));
+
+                var encoded = HtmlEncoder.Default.Encode(text.Substring(m.Start, m.Length));
+                sb.Append($"<mark style=\"background-color:{colorForKeyword(m.Keyword)}\">{encoded}</mark>");
+                cursor = m.End;
+            }
+
+            if (cursor < text.Length)
+                sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor)));
+
+            return new MarkupString(sb.ToString());
+        }
+
+        /// <summary>
+        /// Adds matches from the regex to the match list, mapping named groups back to keywords.
+        /// </summary>
+        private static void CollectMatches(Regex rx, string text, List<Keyword> sourceKeywords, List<Hit> sink)
+        {
+            foreach (Match m in rx.Matches(text))
+            {
+                for (int i = 0; i < sourceKeywords.Count; i++)
+                {
+                    var g = m.Groups[$"k{i}"];
+                    if (g.Success)
+                    {
+                        sink.Add(new Hit(g.Index, g.Index + g.Length, sourceKeywords[i]));
+                        break; // only one group matches
+                    }
+                }
+            }
+        }
+    }
+}
