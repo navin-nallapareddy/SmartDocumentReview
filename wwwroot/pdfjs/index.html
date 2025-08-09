@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>PDF Viewer</title>
+  <title>PDF Viewer (fast highlights)</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf_viewer.min.css" />
   <style>
     html, body { margin: 0; height: 100%; }
@@ -16,136 +16,202 @@
       align-items: flex-start;
       justify-content: center;
     }
+    #viewer {
+      position: relative;
+      width: auto;
+      min-width: 600px;
+      padding: 16px 0;
+    }
     .pageLayer {
       position: relative;
-      margin: 16px;
+      margin: 16px auto;
       box-shadow: 0 1px 4px rgba(0,0,0,.2);
       background: white;
       line-height: 0;
+      width: fit-content;
     }
-    canvas { display: block; background: white; }
-    /* highlight canvas sits on top, mouse goes through */
-    #hl-canvas {
+    /* Only the render canvas is white; highlight canvas is transparent */
+    canvas { display: block; }
+    .renderCanvas { background: white; z-index: 0; }
+    .hlCanvas {
       position: absolute;
       inset: 0;
       pointer-events: none;
+      background: transparent;
+      z-index: 1;
     }
+    .pageMeta { font: 12px/1.4 system-ui, sans-serif; color: #666; text-align: center; padding: 6px 0 0; }
   </style>
 </head>
 <body>
   <div id="viewerContainer">
-    <div id="pageWrapper" class="pageLayer">
-      <canvas id="the-canvas"></canvas>
-      <canvas id="hl-canvas"></canvas>
-    </div>
+    <div id="viewer"></div>
   </div>
 
   <!-- PDF.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
   <script>
     (async function () {
-      const urlParams = new URLSearchParams(location.search);
-      const file    = urlParams.get('file')    || '';
-      const pageNum = parseInt(urlParams.get('page') || '1', 10);
-      const overlay = urlParams.get('overlay') || ''; // e.g. /uploads/latest-highlights.json
+      const params = new URLSearchParams(location.search);
+      const file    = params.get('file')    || '';
+      const overlay = params.get('overlay') || ''; // e.g. /uploads/latest-highlights.json
+      const startAt = parseInt(params.get('page') || '1', 10);
 
       if (!file) {
         console.error('Missing ?file=... parameter');
         return;
       }
 
+      // PDF.js worker
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
 
-      const pageWrapper = document.getElementById('pageWrapper');
-      const renderCanvas = document.getElementById('the-canvas');
-      const hlCanvas = document.getElementById('hl-canvas');
-      const renderCtx = renderCanvas.getContext('2d');
+      const viewer = document.getElementById('viewer');
+      const viewerContainer = document.getElementById('viewerContainer');
 
-      const CSS_SCALE = 1.5;                  // how big the page looks in CSS px
-      const DPR = window.devicePixelRatio || 1; // for sharp rendering
+      // Tuning knobs
+      const CSS_SCALE = 1.5;                    // how large pages appear (CSS pixels)
+      const DPR = window.devicePixelRatio || 1; // render sharpness
 
-      // Load PDF + page
-      const pdf = await pdfjsLib.getDocument(file).promise;
-      const page = await pdf.getPage(pageNum);
-
-      // Viewport for CSS geometry (no DPR)
-      const cssViewport = page.getViewport({ scale: CSS_SCALE });
-
-      // Size main render canvas (device pixels)
-      renderCanvas.width  = Math.floor(cssViewport.width  * DPR);
-      renderCanvas.height = Math.floor(cssViewport.height * DPR);
-      renderCanvas.style.width  = Math.floor(cssViewport.width)  + 'px';
-      renderCanvas.style.height = Math.floor(cssViewport.height) + 'px';
-
-      // Size highlight canvas to match (both CSS size and backing store)
-      hlCanvas.width  = renderCanvas.width;
-      hlCanvas.height = renderCanvas.height;
-      hlCanvas.style.width  = renderCanvas.style.width;
-      hlCanvas.style.height = renderCanvas.style.height;
-
-      // Fit wrapper to page CSS size
-      pageWrapper.style.width  = renderCanvas.style.width;
-      pageWrapper.style.height = renderCanvas.style.height;
-
-      // Render PDF page at DPR scale
-      const deviceViewport = page.getViewport({ scale: CSS_SCALE * DPR });
-      await page.render({ canvasContext: renderCtx, viewport: deviceViewport }).promise;
-
-      // Fetch highlights
-      let rects = [];
+      // Fetch highlight JSON once
+      let highlightsByPage = {};
       if (overlay) {
         try {
           const res = await fetch(overlay, { cache: 'no-store' });
-          const byPage = await res.json();
-          rects = byPage[String(pageNum)] || byPage[pageNum] || [];
+          highlightsByPage = await res.json();
         } catch (e) {
           console.warn('Could not load overlay JSON:', e);
         }
       }
 
-      // Draw all highlights on one canvas (super fast)
-      function drawHighlights(rects) {
-        const ctx = hlCanvas.getContext('2d', { alpha: true, willReadFrequently: false });
-        ctx.clearRect(0, 0, hlCanvas.width, hlCanvas.height);
+      // Load the document
+      const pdf = await pdfjsLib.getDocument(file).promise;
+      const total = pdf.numPages;
 
-        // Style (tweak to taste)
+      // Build basic DOM shells for all pages (no rendering yet)
+      const pageDivs = [];
+      for (let p = 1; p <= total; p++) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'pageLayer';
+        wrapper.dataset.pageNumber = String(p);
+
+        const renderCanvas = document.createElement('canvas');
+        renderCanvas.className = 'renderCanvas';
+
+        const hlCanvas = document.createElement('canvas');
+        hlCanvas.className = 'hlCanvas';
+
+        wrapper.appendChild(renderCanvas);
+        wrapper.appendChild(hlCanvas);
+
+        const meta = document.createElement('div');
+        meta.className = 'pageMeta';
+        meta.textContent = `Page ${p} / ${total}`;
+
+        const outer = document.createElement('div');
+        outer.appendChild(wrapper);
+        outer.appendChild(meta);
+
+        viewer.appendChild(outer);
+        pageDivs.push(wrapper);
+      }
+
+      // Lazy render when a page comes into view
+      const obs = new IntersectionObserver(onIntersect, {
+        root: viewerContainer,
+        rootMargin: '1200px 0px', // pre-render ahead while scrolling
+        threshold: 0.01
+      });
+
+      pageDivs.forEach(d => obs.observe(d));
+
+      // Optionally scroll to a starting page
+      if (startAt > 1 && startAt <= total) {
+        pageDivs[startAt - 1].scrollIntoView({ block: 'start' });
+      }
+
+      async function onIntersect(entries) {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          obs.unobserve(e.target);
+          const pageNumber = parseInt(e.target.dataset.pageNumber, 10);
+          try {
+            await renderPage(pageNumber, e.target);
+          } catch (err) {
+            console.error('Render failed for page', pageNumber, err);
+          }
+        }
+      }
+
+      // Render a single page and draw its highlights (fast path)
+      async function renderPage(pageNumber, pageDiv) {
+        const renderCanvas = pageDiv.querySelector('.renderCanvas');
+        const hlCanvas = pageDiv.querySelector('.hlCanvas');
+
+        const page = await pdf.getPage(pageNumber);
+
+        // Viewports
+        const cssViewport = page.getViewport({ scale: CSS_SCALE });          // CSS px, top-left origin
+        const deviceViewport = page.getViewport({ scale: CSS_SCALE * DPR }); // device px
+
+        // Size canvases
+        renderCanvas.width  = Math.floor(deviceViewport.width);
+        renderCanvas.height = Math.floor(deviceViewport.height);
+        renderCanvas.style.width  = Math.floor(cssViewport.width)  + 'px';
+        renderCanvas.style.height = Math.floor(cssViewport.height) + 'px';
+
+        hlCanvas.width  = renderCanvas.width;
+        hlCanvas.height = renderCanvas.height;
+        hlCanvas.style.width  = renderCanvas.style.width;
+        hlCanvas.style.height = renderCanvas.style.height;
+
+        // Fit wrapper to CSS size (for centering & shadows)
+        pageDiv.style.width  = renderCanvas.style.width;
+        pageDiv.style.height = renderCanvas.style.height;
+
+        // Render PDF page
+        const ctx = renderCanvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport: deviceViewport }).promise;
+
+        // Draw highlights
+        const rects = (highlightsByPage[String(pageNumber)] || highlightsByPage[pageNumber] || []);
+        drawHighlights(hlCanvas, rects, cssViewport);
+      }
+
+      // Use viewport helper to convert PDF-space rect → CSS px, then scale to device px
+      function drawHighlights(hlCanvas, rects, cssViewport) {
+        const ctx = hlCanvas.getContext('2d', { alpha: true });
+        ctx.clearRect(0, 0, hlCanvas.width, hlCanvas.height);
         ctx.globalAlpha = 0.3;
         ctx.globalCompositeOperation = 'multiply';
 
-        // PDF coords are in points with origin bottom-left.
-        // Map to device pixels (DPR applied) with the same scale used for rendering.
-        const s = CSS_SCALE * DPR;
-        const pageHeightCss = cssViewport.height; // CSS px
-        const pageHeightDev = pageHeightCss * DPR; // device px for Y inversion
-
-        // Optional: if your JSON carries colors, group by color to reduce state changes
-        // For simplicity, do a single pass:
+        // Batch in a single frame
         requestAnimationFrame(() => {
           for (let i = 0; i < rects.length; i++) {
             const r = rects[i];
-            // Support both {w,h} and {width,height} shapes
             const w = r.w ?? r.width;
             const h = r.h ?? r.height;
 
-            const x = (r.x * s) | 0;
-            const yTop = pageHeightDev - ((r.y + h) * s);
-            const wpx = (w * s) | 0;
-            const hpx = (h * s) | 0;
+            // Convert two corners using PDF.js (handles rotation & origin flip)
+            const [vx1, vy1] = cssViewport.convertToViewportPoint(r.x, r.y);
+            const [vx2, vy2] = cssViewport.convertToViewportPoint(r.x + w, r.y + h);
 
-            if (r.color) {
-              ctx.fillStyle = r.color; // e.g., "rgba(255,255,0,1)" or "yellow"
-            } else {
-              ctx.fillStyle = 'yellow';
-            }
-            ctx.fillRect(x, yTop, wpx, hpx);
+            // Normalize to top-left origin in CSS, then to device pixels via DPR
+            const leftCss = Math.min(vx1, vx2);
+            const topCss  = Math.min(vy1, vy2);
+            const widthCss  = Math.abs(vx2 - vx1);
+            const heightCss = Math.abs(vy2 - vy1);
+
+            const leftDev = Math.round(leftCss * (window.devicePixelRatio || 1));
+            const topDev  = Math.round(topCss  * (window.devicePixelRatio || 1));
+            const widthDev  = Math.max(1, Math.round(widthCss  * (window.devicePixelRatio || 1)));
+            const heightDev = Math.max(1, Math.round(heightCss * (window.devicePixelRatio || 1)));
+
+            ctx.fillStyle = r.color || 'yellow';
+            ctx.fillRect(leftDev, topDev, widthDev, heightDev);
           }
         });
       }
-
-      drawHighlights(rects);
-
-      // (Optional) If you add zooming later, re-run render + drawHighlights with the new scale.
     })();
   </script>
 </body>
