@@ -23,20 +23,12 @@
       background: white;
       line-height: 0;
     }
-    canvas {
-      display: block;
-      background: white;
-    }
-    .overlayLayer {
+    canvas { display: block; background: white; }
+    /* highlight canvas sits on top, mouse goes through */
+    #hl-canvas {
       position: absolute;
-      left: 0;
-      top: 0;
-      pointer-events: none; /* allow clicks to pass through */
-    }
-    .hl {
-      position: absolute;
-      opacity: .35; /* translucency for highlights */
-      mix-blend-mode: multiply;
+      inset: 0;
+      pointer-events: none;
     }
   </style>
 </head>
@@ -44,7 +36,7 @@
   <div id="viewerContainer">
     <div id="pageWrapper" class="pageLayer">
       <canvas id="the-canvas"></canvas>
-      <div id="overlay" class="overlayLayer"></div>
+      <canvas id="hl-canvas"></canvas>
     </div>
   </div>
 
@@ -62,47 +54,45 @@
         return;
       }
 
-      // Configure worker
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
 
-      // Elements
       const pageWrapper = document.getElementById('pageWrapper');
-      const canvas = document.getElementById('the-canvas');
-      const overlayDiv = document.getElementById('overlay');
-      const ctx = canvas.getContext('2d');
+      const renderCanvas = document.getElementById('the-canvas');
+      const hlCanvas = document.getElementById('hl-canvas');
+      const renderCtx = renderCanvas.getContext('2d');
 
-      // Device pixel ratio for crisper rendering
-      const CSS_SCALE = 1.5;
-      const DPR = window.devicePixelRatio || 1;
+      const CSS_SCALE = 1.5;                  // how big the page looks in CSS px
+      const DPR = window.devicePixelRatio || 1; // for sharp rendering
 
       // Load PDF + page
       const pdf = await pdfjsLib.getDocument(file).promise;
       const page = await pdf.getPage(pageNum);
 
-      // Build viewport (PDF points -> CSS pixels)
-      const viewport = page.getViewport({ scale: CSS_SCALE });
+      // Viewport for CSS geometry (no DPR)
+      const cssViewport = page.getViewport({ scale: CSS_SCALE });
 
-      // Size canvas with DPR for sharpness
-      canvas.width  = Math.floor(viewport.width  * DPR);
-      canvas.height = Math.floor(viewport.height * DPR);
-      canvas.style.width  = Math.floor(viewport.width)  + 'px';
-      canvas.style.height = Math.floor(viewport.height) + 'px';
+      // Size main render canvas (device pixels)
+      renderCanvas.width  = Math.floor(cssViewport.width  * DPR);
+      renderCanvas.height = Math.floor(cssViewport.height * DPR);
+      renderCanvas.style.width  = Math.floor(cssViewport.width)  + 'px';
+      renderCanvas.style.height = Math.floor(cssViewport.height) + 'px';
 
-      // Size overlay to match canvas CSS size
-      overlayDiv.style.width  = canvas.style.width;
-      overlayDiv.style.height = canvas.style.height;
+      // Size highlight canvas to match (both CSS size and backing store)
+      hlCanvas.width  = renderCanvas.width;
+      hlCanvas.height = renderCanvas.height;
+      hlCanvas.style.width  = renderCanvas.style.width;
+      hlCanvas.style.height = renderCanvas.style.height;
 
-      // Fit wrapper around the page size
-      pageWrapper.style.width  = canvas.style.width;
-      pageWrapper.style.height = canvas.style.height;
+      // Fit wrapper to page CSS size
+      pageWrapper.style.width  = renderCanvas.style.width;
+      pageWrapper.style.height = renderCanvas.style.height;
 
-      // Render the page
-      await page.render({
-        canvasContext: ctx,
-        viewport: page.getViewport({ scale: CSS_SCALE * DPR }) // render at DPR scale
-      }).promise;
+      // Render PDF page at DPR scale
+      const deviceViewport = page.getViewport({ scale: CSS_SCALE * DPR });
+      await page.render({ canvasContext: renderCtx, viewport: deviceViewport }).promise;
 
-      // Load overlay JSON (per-page highlights)
+      // Fetch highlights
       let rects = [];
       if (overlay) {
         try {
@@ -114,41 +104,48 @@
         }
       }
 
-      // Helper: convert PDF coordinates (origin bottom-left, units in PDF points)
-      // to CSS pixels for the overlay (origin top-left)
-      function pdfRectToCss(x, y, w, h) {
-        // First, PDF points -> CSS px using viewport scale
-        const sx = CSS_SCALE; // viewport.scale (CSS)
-        const sy = CSS_SCALE;
+      // Draw all highlights on one canvas (super fast)
+      function drawHighlights(rects) {
+        const ctx = hlCanvas.getContext('2d', { alpha: true, willReadFrequently: false });
+        ctx.clearRect(0, 0, hlCanvas.width, hlCanvas.height);
 
-        const cssX = x * sx;
-        const cssW = w * sx;
+        // Style (tweak to taste)
+        ctx.globalAlpha = 0.3;
+        ctx.globalCompositeOperation = 'multiply';
 
-        // Y needs inversion because PDF origin is bottom-left; CSS is top-left.
-        // PDF page height in CSS pixels:
-        const pageHeightCss = viewport.height;
-        const cssY = (pageHeightCss - (y + h) * sy);
-        const cssH = h * sy;
+        // PDF coords are in points with origin bottom-left.
+        // Map to device pixels (DPR applied) with the same scale used for rendering.
+        const s = CSS_SCALE * DPR;
+        const pageHeightCss = cssViewport.height; // CSS px
+        const pageHeightDev = pageHeightCss * DPR; // device px for Y inversion
 
-        return { left: cssX, top: cssY, width: cssW, height: cssH };
+        // Optional: if your JSON carries colors, group by color to reduce state changes
+        // For simplicity, do a single pass:
+        requestAnimationFrame(() => {
+          for (let i = 0; i < rects.length; i++) {
+            const r = rects[i];
+            // Support both {w,h} and {width,height} shapes
+            const w = r.w ?? r.width;
+            const h = r.h ?? r.height;
+
+            const x = (r.x * s) | 0;
+            const yTop = pageHeightDev - ((r.y + h) * s);
+            const wpx = (w * s) | 0;
+            const hpx = (h * s) | 0;
+
+            if (r.color) {
+              ctx.fillStyle = r.color; // e.g., "rgba(255,255,0,1)" or "yellow"
+            } else {
+              ctx.fillStyle = 'yellow';
+            }
+            ctx.fillRect(x, yTop, wpx, hpx);
+          }
+        });
       }
 
-      // Draw rectangles
-      overlayDiv.innerHTML = '';
-      for (const r of rects) {
-        const { left, top, width, height } = pdfRectToCss(r.x, r.y, r.w, r.h);
-        const div = document.createElement('div');
-        div.className = 'hl';
-        div.style.left   = left   + 'px';
-        div.style.top    = top    + 'px';
-        div.style.width  = width  + 'px';
-        div.style.height = height + 'px';
-        div.style.background = r.color || 'yellow';
-        overlayDiv.appendChild(div);
-      }
+      drawHighlights(rects);
 
-      // Optional: handle window resize (keeps current simple; full re-render is best)
-      // In most app shells, the iframe isn't resized frequently, so we omit it for now.
+      // (Optional) If you add zooming later, re-run render + drawHighlights with the new scale.
     })();
   </script>
 </body>
