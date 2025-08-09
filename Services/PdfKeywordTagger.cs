@@ -8,6 +8,7 @@ using System.IO;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using SmartDocumentReview.Models;
+using SmartDocumentReview.Shared; // <-- unified regex helpers
 
 namespace SmartDocumentReview.Services
 {
@@ -27,11 +28,16 @@ namespace SmartDocumentReview.Services
 
             using var pdf = PdfDocument.Open(memory);
 
+            // Pre-split keywords once
+            var wholeKw = keywords.Where(k => !k.AllowPartial).ToList();
+            var partKw  = keywords.Where(k =>  k.AllowPartial).ToList();
+
             for (int i = 1; i <= pdf.NumberOfPages; i++)
             {
                 var page = pdf.GetPage(i);
                 var letters = page.Letters;
 
+                // Build page text + letter-index spans so we can compute bounding boxes reliably
                 var pageTextBuilder = new StringBuilder();
                 var spans = new List<(int start, int end, Letter letter)>();
                 int offset = 0;
@@ -45,60 +51,106 @@ namespace SmartDocumentReview.Services
 
                 var pageText = pageTextBuilder.ToString();
 
-                // If no text was extracted, fall back to Tesseract OCR
+                // If no text was extracted, fall back to OCR for this page
                 if (string.IsNullOrWhiteSpace(pageText))
                 {
                     pageText = RunOcr(tempPdf, i);
-                    spans.Clear();
+                    spans.Clear(); // no glyphs available from OCR text
                 }
+
                 var sectionTitle = $"Page {i}";
 
-                foreach (var keyword in keywords)
+                // --- Unified multi-keyword matching (one pass per class) ----------------------
+                var rawHits = new List<(int start, int end, Keyword kw)>(64);
+
+                // Helper to collect matches with named groups (?<k{i}>) so we can map to the right Keyword
+                static void Collect(Regex rx, string text, List<Keyword> srcKw, List<(int start, int end, Keyword kw)> sink)
                 {
-                    var escaped = Regex.Escape(keyword.Text);
-                    // Use custom boundaries when partial matches aren't allowed to avoid partial word highlights.
-                    // Treat common word punctuation like apostrophes, hyphens and underscores as part of the word
-                    // to prevent matches such as "bank" in "bank's" when whole-word matching is requested.
-                    var pattern = keyword.AllowPartial
-                        ? escaped
-                        : $@"(?<![\p{{L}}\p{{N}}_\u2019'-]){escaped}(?![\p{{L}}\p{{N}}_\u2019'-])";
-
-                    var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
-                    foreach (Match match in regex.Matches(pageText))
+                    foreach (Match m in rx.Matches(text))
                     {
-                        double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-                        var relevant = spans
-                            .Where(s => s.start < match.Index + match.Length && s.end > match.Index)
+                        for (int gi = 0; gi < srcKw.Count; gi++)
+                        {
+                            var g = m.Groups[$"k{gi}"];
+                            if (g.Success)
+                            {
+                                sink.Add((g.Index, g.Index + g.Length, srcKw[gi]));
+                                break; // only one named group will be set
+                            }
+                        }
+                    }
+                }
+
+                if (wholeKw.Count > 0)
+                {
+                    var rxWhole = KeywordRegex.BuildWholeWordRegex(wholeKw.Select(k => k.Text));
+                    Collect(rxWhole, pageText, wholeKw, rawHits);
+                }
+                if (partKw.Count > 0)
+                {
+                    var rxPart = KeywordRegex.BuildPartialRegex(partKw.Select(k => k.Text));
+                    Collect(rxPart, pageText, partKw, rawHits);
+                }
+
+                if (rawHits.Count == 0) continue;
+
+                // Deterministic ordering & conflict resolution:
+                // 1) sort by start asc, 2) length desc; 3) dedupe exact spans; 4) skip true overlaps
+                var ordered = rawHits
+                    .OrderBy(h => h.start)
+                    .ThenByDescending(h => h.end - h.start)
+                    .ToList();
+
+                var canonical = new List<(int start, int end, Keyword kw)>(ordered.Count);
+                var seen = new HashSet<(int s, int e)>();
+                int lastEnd = -1;
+
+                foreach (var h in ordered)
+                {
+                    if (!seen.Add((h.start, h.end))) continue; // skip identical span dupes
+                    if (h.start < lastEnd) continue;            // skip overlaps (earlier/longer already kept)
+                    canonical.Add(h);
+                    lastEnd = h.end;
+                }
+
+                // Map canonical text ranges to rectangles (when glyphs exist), extract context, and emit TagMatch
+                foreach (var h in canonical)
+                {
+                    double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+
+                    if (spans.Count > 0)
+                    {
+                        var relevantRects = spans
+                            .Where(s => s.start < h.end && s.end > h.start)
                             .Select(s => s.letter.GlyphRectangle)
                             .ToList();
 
-                        if (relevant.Count > 0)
+                        if (relevantRects.Count > 0)
                         {
-                            x1 = relevant.Min(r => r.Left);
-                            y1 = relevant.Min(r => r.Bottom);
-                            x2 = relevant.Max(r => r.Right);
-                            y2 = relevant.Max(r => r.Top);
+                            x1 = relevantRects.Min(r => r.Left);
+                            y1 = relevantRects.Min(r => r.Bottom);
+                            x2 = relevantRects.Max(r => r.Right);
+                            y2 = relevantRects.Max(r => r.Top);
                         }
-
-                        // Extract matched context (±60 characters around the match)
-                        var start = Math.Max(0, match.Index - 60);
-                        var end = Math.Min(pageText.Length, match.Index + match.Length + 60);
-                        var context = pageText.Substring(start, end - start);
-
-                        matches.Add(new TagMatch
-                        {
-                            Keyword = keyword.Text,
-                            SectionTitle = sectionTitle,
-                            MatchedText = context,
-                            CreatedBy = createdBy,
-                            CreatedAt = DateTime.UtcNow,
-                            PageNumber = i,
-                            PageX = (float)x1,
-                            PageY = (float)y1,
-                            Width = (float)(x2 - x1)
-                        });
                     }
+
+                    // Extract matched context (±60 characters around the match)
+                    var ctxStart = Math.Max(0, h.start - 60);
+                    var ctxEnd   = Math.Min(pageText.Length, h.end + 60);
+                    var context  = pageText.Substring(ctxStart, ctxEnd - ctxStart);
+
+                    matches.Add(new TagMatch
+                    {
+                        Keyword     = h.kw.Text,
+                        SectionTitle= sectionTitle,
+                        MatchedText = context,
+                        CreatedBy   = createdBy,
+                        CreatedAt   = DateTime.UtcNow,
+                        PageNumber  = i,
+                        PageX       = (float)x1,
+                        PageY       = (float)y1,
+                        Width       = (float)(x2 - x1) // keeping your original shape fields
+                        // If your TagMatch supports Height, consider setting it to (float)(y2 - y1)
+                    });
                 }
             }
 
@@ -164,4 +216,3 @@ namespace SmartDocumentReview.Services
         }
     }
 }
-
