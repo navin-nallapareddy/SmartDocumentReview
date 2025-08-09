@@ -23,8 +23,6 @@ namespace SmartDocumentReview.Pages
 
         /// <summary>
         /// Build safe, accurate multi-keyword highlights for the given text.
-        /// Call from your .razor like:
-        /// @BuildHighlights(snippetText, CurrentKeywords, k => ColorMap[k])
         /// </summary>
         protected MarkupString BuildHighlights(string text, IEnumerable<Keyword> keywords, Func<Keyword, string> colorForKeyword)
         {
@@ -67,22 +65,22 @@ namespace SmartDocumentReview.Pages
                 lastEnd = m.End;
             }
 
-            // Build HTML with safe encoding (only <mark> wrapper is raw)
+            // Build HTML (use Substring to satisfy HtmlEncoder API)
             var sb = new StringBuilder(text.Length + canonical.Count * 40);
             int cursor = 0;
 
             foreach (var m in canonical)
             {
                 if (cursor < m.Start)
-                    sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor, m.Start - cursor)));
+                    sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor, m.Start - cursor)));
 
-                var encoded = HtmlEncoder.Default.Encode(text.AsSpan(m.Start, m.Length));
+                var encoded = HtmlEncoder.Default.Encode(text.Substring(m.Start, m.Length));
                 sb.Append($"<mark style=\"background-color:{colorForKeyword(m.Keyword)}\">{encoded}</mark>");
                 cursor = m.End;
             }
 
             if (cursor < text.Length)
-                sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor)));
+                sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor)));
 
             return new MarkupString(sb.ToString());
         }
