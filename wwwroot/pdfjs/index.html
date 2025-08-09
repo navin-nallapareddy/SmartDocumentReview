@@ -77,21 +77,25 @@
         return;
       }
 
-      // PDF.js worker
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+      // --- PERF LOGGING ---
+      const t0 = performance.now();
+      const mark = (msg) => console.log(`[perf] ${msg}: ${(performance.now()-t0).toFixed(1)}ms`);
+
+      // Verify worker actually loads (fallback = very slow)
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+      mark('worker configured');
 
       const viewer          = document.getElementById('viewer');
       const viewerContainer = document.getElementById('viewerContainer');
 
       // ---- Tuning knobs ----
-      const CSS_SCALE = 1.25;                     // visual zoom (CSS pixels)
-      const DPR_CAP   = 1.5;                      // cap DPR to keep canvases small
+      const CSS_SCALE = 1.25;
+      const DPR_CAP   = 1.5;
       const getDPR    = () => Math.min(window.devicePixelRatio || 1, DPR_CAP);
       let   CURRENT_DPR = getDPR();
-      const ACTIVE_RADIUS = 3;                    // render ±N pages around viewport
+      const ACTIVE_RADIUS = 2; // tighter window for faster startup
       const hw = navigator.hardwareConcurrency || 4;
-      const CONCURRENCY = Math.min(6, Math.max(2, Math.floor(hw / 2)));
+      const CONCURRENCY = Math.min(8, Math.max(2, Math.floor(hw - 1))); // use CPU better
 
       // ---- Load highlights once ----
       let highlightsByPage = {};
@@ -99,188 +103,184 @@
         try {
           const res = await fetch(overlay, { cache: 'no-store' });
           highlightsByPage = await res.json();
-        } catch (e) {
-          console.warn('Could not load overlay JSON:', e);
-        }
+        } catch (e) { console.warn('Could not load overlay JSON:', e); }
       }
 
       // ---- Open PDF with streaming + larger range chunks ----
       const loadingTask = pdfjsLib.getDocument({
         url: file,
-        rangeChunkSize: 1 << 20,   // 1 MiB ranged fetches
-        disableAutoFetch: true,    // strict windowing; no runaway prefetch
-        disableStream: false,      // allow streaming
+        rangeChunkSize: 1 << 20,   // 1 MiB
+        disableAutoFetch: true,
+        disableStream: false,
         withCredentials: false
       });
+
+      // 1) Render ONLY the requested page ASAP (no DOM for others yet).
       const pdf = await loadingTask.promise;
       const total = pdf.numPages;
+      mark('pdf loaded');
 
-      // ---- Virtualized DOM: lightweight slots only ----
+      const startP = Math.min(total, Math.max(1, startAt));
+      const page   = await pdf.getPage(startP);
+      const cssViewport = page.getViewport({ scale: CSS_SCALE });
+      const devViewport = page.getViewport({ scale: CSS_SCALE * CURRENT_DPR });
+
+      // Minimal DOM just for first page to get first paint fast
+      const slot = document.createElement('div');
+      slot.className = 'pageSlot';
+      slot.dataset.pageNumber = String(startP);
+
+      const container = document.createElement('div');
+      container.style.display = 'inline-block';
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'pageLayer';
+      wrapper.dataset.pageNumber = String(startP);
+
+      const renderCanvas = document.createElement('canvas');
+      renderCanvas.className = 'renderCanvas';
+      renderCanvas.width  = Math.floor(devViewport.width);
+      renderCanvas.height = Math.floor(devViewport.height);
+      renderCanvas.style.width  = Math.floor(cssViewport.width) + 'px';
+      renderCanvas.style.height = Math.floor(cssViewport.height) + 'px';
+
+      const hlCanvas = document.createElement('canvas');
+      hlCanvas.className = 'hlCanvas';
+      hlCanvas.width  = renderCanvas.width;
+      hlCanvas.height = renderCanvas.height;
+      hlCanvas.style.width  = renderCanvas.style.width;
+      hlCanvas.style.height = renderCanvas.style.height;
+
+      wrapper.appendChild(renderCanvas);
+      wrapper.appendChild(hlCanvas);
+
+      const meta = document.createElement('div');
+      meta.className = 'pageMeta';
+      meta.textContent = `Page ${startP} / ${total}`;
+
+      container.appendChild(wrapper);
+      container.appendChild(meta);
+      slot.appendChild(container);
+      viewer.appendChild(slot);
+
+      // Immediate render of first page
+      const ctx = renderCanvas.getContext('2d', { alpha: false });
+      const firstTask = page.render({ canvasContext: ctx, viewport: devViewport });
+      await firstTask.promise;
+      mark('first page rendered');
+
+      // Draw highlights for first page
+      const rects0 = (highlightsByPage[String(startP)] || highlightsByPage[startP] || []);
+      drawHighlights(hlCanvas, rects0, cssViewport);
+
+      // 2) Now that we have true size, build virtualized structure for ALL pages in idle time
       const slots = [];
-      let estimatedCss = { width: 800, height: 1100 }; // updated after first page
-      for (let p = 1; p <= total; p++) {
-        const slot = document.createElement('div');
-        slot.className = 'pageSlot';
-        slot.dataset.pageNumber = String(p);
-        slot.style.width  = estimatedCss.width + 'px';
-        slot.style.height = (estimatedCss.height + 22) + 'px'; // +meta
+      let estimatedCss = { width: Math.floor(cssViewport.width), height: Math.floor(cssViewport.height) };
 
-        // meta below content
-        const meta = document.createElement('div');
-        meta.className = 'pageMeta';
-        meta.textContent = `Page ${p} / ${total}`;
-
-        // container for wrapper + meta
-        const container = document.createElement('div');
-        container.style.display = 'inline-block';
-        container.appendChild(meta);
-
-        slot.appendChild(container);
-        viewer.appendChild(slot);
-        slots.push({ slot, container, wrapper: null });
+      // Insert placeholders before and after the already-rendered page without long tasks
+      async function buildSlotsInBatches() {
+        const BATCH = 200;
+        // before
+        for (let i = startP - 1; i >= 1; i -= BATCH) {
+          await new Promise(r => requestIdleCallback(r, { timeout: 50 }));
+          for (let p = Math.max(1, i - BATCH + 1); p <= i; p++) addSlot(p);
+        }
+        // after
+        for (let i = startP + 1; i <= total; i += BATCH) {
+          await new Promise(r => requestIdleCallback(r, { timeout: 50 }));
+          for (let p = i; p <= Math.min(total, i + BATCH - 1); p++) addSlot(p);
+        }
       }
 
-      // ---- IntersectionObserver to track visibility without O(N) scans ----
-      const visibleRatios = new Map(); // page -> intersectionRatio
+      function addSlot(p) {
+        if (p === startP) { slots[p - 1] = { slot, container, wrapper }; return; }
+        const s = document.createElement('div');
+        s.className = 'pageSlot';
+        s.dataset.pageNumber = String(p);
+        s.style.width  = estimatedCss.width + 'px';
+        s.style.height = (estimatedCss.height + 22) + 'px';
+
+        const c = document.createElement('div');
+        c.style.display = 'inline-block';
+        const m = document.createElement('div');
+        m.className = 'pageMeta';
+        m.textContent = `Page ${p} / ${total}`;
+        c.appendChild(m);
+        s.appendChild(c);
+
+        if (p < startP) viewer.insertBefore(s, viewer.firstChild);
+        else viewer.appendChild(s);
+        slots[p - 1] = { slot: s, container: c, wrapper: null };
+      }
+
+      await buildSlotsInBatches();
+      mark('all placeholders built');
+
+      // ---- IntersectionObserver (observe only after slots exist) ----
+      const visibleRatios = new Map();
       const io = new IntersectionObserver(entries => {
         for (const e of entries) {
           const p = Number(e.target.dataset.pageNumber);
           visibleRatios.set(p, e.isIntersecting ? e.intersectionRatio : 0);
         }
         scheduleWindowUpdate();
-      }, {
-        root: viewerContainer,
-        rootMargin: '200% 0px',
-        threshold: [0, 0.01, 0.25, 0.5, 0.75, 1]
-      });
-      for (const { slot } of slots) io.observe(slot);
+      }, { root: viewerContainer, rootMargin: '200% 0px', threshold: [0, 0.01, 0.25, 0.5, 0.75, 1] });
+      for (const it of slots) if (it) io.observe(it.slot);
 
       function nearestVisiblePage() {
-        let best = 1, bestRatio = -1;
-        for (const [p, r] of visibleRatios) {
-          if (r > bestRatio) { bestRatio = r; best = p; }
-        }
+        let best = startP, bestRatio = -1;
+        for (const [p, r] of visibleRatios) { if (r > bestRatio) { bestRatio = r; best = p; } }
         return best;
       }
 
-      // ---- Render queue + bookkeeping ----
-      const renderTasks = new Map(); // pageNo -> { task, page }
-      const rendered    = new Set(); // pages fully drawn
-      const pending     = new Set(); // unique page numbers
+      const renderTasks = new Map();
+      const rendered    = new Set();
+      const pending     = new Set();
       let inFlight = 0;
-      let centerPage = 1;
-      let firstViewportMeasured = false;
+      let centerPage = startP;
 
       function ensureWrapper(p, cssViewport, devViewport) {
         const entry = slots[p - 1];
         if (entry.wrapper) return entry.wrapper;
-
-        const wrapper = document.createElement('div');
-        wrapper.className = 'pageLayer';
-        wrapper.dataset.pageNumber = String(p);
-
-        const renderCanvas = document.createElement('canvas');
-        renderCanvas.className = 'renderCanvas';
-
-        const hlCanvas = document.createElement('canvas');
-        hlCanvas.className = 'hlCanvas';
-
-        wrapper.appendChild(renderCanvas);
-        wrapper.appendChild(hlCanvas);
-
-        // Insert wrapper above meta inside the slot's container
-        entry.container.insertBefore(wrapper, entry.container.firstChild);
-        entry.wrapper = wrapper;
-
-        return wrapper;
+        const w = document.createElement('div');
+        w.className = 'pageLayer';
+        w.dataset.pageNumber = String(p);
+        const rc = document.createElement('canvas'); rc.className = 'renderCanvas';
+        const hc = document.createElement('canvas'); hc.className = 'hlCanvas';
+        w.appendChild(rc); w.appendChild(hc);
+        entry.container.insertBefore(w, entry.container.firstChild);
+        entry.wrapper = w;
+        return w;
       }
-
       function destroyWrapper(p) {
-        const entry = slots[p - 1];
-        if (!entry.wrapper) return;
-        entry.container.removeChild(entry.wrapper);
-        entry.wrapper = null;
+        const e = slots[p - 1]; if (!e || !e.wrapper) return; e.container.removeChild(e.wrapper); e.wrapper = null;
       }
-
-      function queueRender(p) {
-        if (pending.has(p) || renderTasks.has(p) || rendered.has(p)) return;
-        pending.add(p);
-        pump();
-      }
-
-      function pickNextPage() {
-        let best = null, bestScore = Infinity;
-        for (const p of pending) {
-          const score = Math.abs(p - centerPage);
-          if (score < bestScore) { bestScore = score; best = p; }
-        }
-        if (best != null) pending.delete(best);
-        return best;
-      }
+      function queueRender(p) { if (pending.has(p) || renderTasks.has(p) || rendered.has(p)) return; pending.add(p); pump(); }
+      function pickNextPage() { let best=null,b=1e9; for (const p of pending){ const s=Math.abs(p-centerPage); if(s<b){b=s;best=p;}} if(best!=null) pending.delete(best); return best; }
 
       async function pump() {
         while (inFlight < CONCURRENCY) {
-          const p = pickNextPage();
-          if (!p) return;
-          inFlight++;
-
+          const p = pickNextPage(); if (!p) return; inFlight++;
           try {
             const page = await pdf.getPage(p);
-            const cssViewport = page.getViewport({ scale: CSS_SCALE });
-            const devViewport = page.getViewport({ scale: CSS_SCALE * CURRENT_DPR });
-
-            // Create wrapper and size canvases
-            const wrapper = ensureWrapper(p, cssViewport, devViewport);
-            const renderCanvas = wrapper.querySelector('.renderCanvas');
-            const hlCanvas = wrapper.querySelector('.hlCanvas');
-
-            renderCanvas.width  = Math.floor(devViewport.width);
-            renderCanvas.height = Math.floor(devViewport.height);
-            renderCanvas.style.width  = Math.floor(cssViewport.width) + 'px';
-            renderCanvas.style.height = Math.floor(cssViewport.height) + 'px';
-
-            hlCanvas.width  = renderCanvas.width;
-            hlCanvas.height = renderCanvas.height;
-            hlCanvas.style.width  = renderCanvas.style.width;
-            hlCanvas.style.height = renderCanvas.style.height;
-
-            wrapper.style.width  = renderCanvas.style.width;
-            wrapper.style.height = renderCanvas.style.height;
-
-            // Update placeholder dimensions once we know the real size
-            if (!firstViewportMeasured) {
-              firstViewportMeasured = true;
-              estimatedCss = { width: Math.floor(cssViewport.width), height: Math.floor(cssViewport.height) };
-              for (let i = 1; i <= total; i++) {
-                if (!slots[i - 1].wrapper) {
-                  slots[i - 1].slot.style.width  = estimatedCss.width + 'px';
-                  slots[i - 1].slot.style.height = (estimatedCss.height + 22) + 'px';
-                }
-              }
-            }
-
-            const ctx = renderCanvas.getContext('2d', { alpha: false });
-            const task = page.render({ canvasContext: ctx, viewport: devViewport });
+            const cssV = page.getViewport({ scale: CSS_SCALE });
+            const devV = page.getViewport({ scale: CSS_SCALE * CURRENT_DPR });
+            const wrapper = ensureWrapper(p, cssV, devV);
+            const rc = wrapper.querySelector('.renderCanvas');
+            const hc = wrapper.querySelector('.hlCanvas');
+            rc.width = Math.floor(devV.width); rc.height = Math.floor(devV.height);
+            rc.style.width = Math.floor(cssV.width)+'px'; rc.style.height = Math.floor(cssV.height)+'px';
+            hc.width = rc.width; hc.height = rc.height; hc.style.width = rc.style.width; hc.style.height = rc.style.height;
+            wrapper.style.width = rc.style.width; wrapper.style.height = rc.style.height;
+            const ctx = rc.getContext('2d', { alpha:false });
+            const task = page.render({ canvasContext: ctx, viewport: devV });
             renderTasks.set(p, { task, page });
-
-            await task.promise; // throws if canceled
-            renderTasks.delete(p);
-
-            if (Math.abs(p - centerPage) <= ACTIVE_RADIUS) {
-              const rects = (highlightsByPage[String(p)] || highlightsByPage[p] || []);
-              drawHighlights(hlCanvas, rects, cssViewport);
-              rendered.add(p);
-            } else {
-              page.cleanup();
-              destroyWrapper(p);
-            }
+            await task.promise; renderTasks.delete(p);
+            if (Math.abs(p - centerPage) <= ACTIVE_RADIUS) { const rects=(highlightsByPage[String(p)]||highlightsByPage[p]||[]); drawHighlights(hc, rects, cssV); rendered.add(p); }
+            else { page.cleanup(); destroyWrapper(p); }
           } catch (err) {
-            if (!(err && (err.name === 'RenderingCancelled' || String(err).includes('Rendering cancelled')))) {
-              console.warn('Render error on page', p, err);
-            }
-          } finally {
-            inFlight--;
-          }
+            if (!(err && (err.name === 'RenderingCancelled' || String(err).includes('Rendering cancelled')))) console.warn('Render error on page', p, err);
+          } finally { inFlight--; }
         }
       }
 
@@ -288,103 +288,54 @@
         centerPage = nearestVisiblePage();
         const minP = Math.max(1, centerPage - ACTIVE_RADIUS);
         const maxP = Math.min(total, centerPage + ACTIVE_RADIUS);
-
         const keep = new Set();
-        for (let p = minP; p <= maxP; p++) {
-          keep.add(p);
-          if (!rendered.has(p) && !renderTasks.has(p)) queueRender(p);
-        }
-
-        // Cancel far-off render tasks and free memory
-        for (const [p, obj] of Array.from(renderTasks.entries())) {
-          if (!keep.has(p)) {
-            try { obj.task.cancel(); } catch {}
-            renderTasks.delete(p);
-            obj.page?.cleanup();
-          }
-        }
-
-        for (let p = 1; p <= total; p++) {
-          if (!keep.has(p) && rendered.has(p)) {
-            destroyWrapper(p);
-            rendered.delete(p);
-          }
-        }
-
-        // Keep the pump going in case new items were queued
+        for (let p=minP; p<=maxP; p++){ keep.add(p); if(!rendered.has(p) && !renderTasks.has(p)) queueRender(p); }
+        for (const [p, obj] of Array.from(renderTasks.entries())) { if (!keep.has(p)) { try{obj.task.cancel();}catch{} renderTasks.delete(p); obj.page?.cleanup(); } }
+        for (let p=1;p<=total;p++){ if(!keep.has(p) && rendered.has(p)){ destroyWrapper(p); rendered.delete(p);} }
         pump();
       }
 
       let scrollRAF = 0;
-      function scheduleWindowUpdate() {
-        if (scrollRAF) cancelAnimationFrame(scrollRAF);
-        scrollRAF = requestAnimationFrame(() => {
-          updateActiveWindow();
-          scrollRAF = 0;
-        });
-      }
+      function scheduleWindowUpdate(){ if(scrollRAF) cancelAnimationFrame(scrollRAF); scrollRAF = requestAnimationFrame(()=>{ updateActiveWindow(); scrollRAF=0; }); }
+      viewerContainer.addEventListener('scroll', scheduleWindowUpdate, { passive:true });
 
-      viewerContainer.addEventListener('scroll', scheduleWindowUpdate, { passive: true });
-
-      // ---- Highlight drawing (batched by color; rotation-safe) ----
       function drawHighlights(hlCanvas, rects, cssViewport) {
         const ctx = hlCanvas.getContext('2d', { alpha: true });
         ctx.clearRect(0, 0, hlCanvas.width, hlCanvas.height);
         ctx.globalAlpha = 0.3;
-        // ctx.globalCompositeOperation = 'multiply'; // enable if specific blending is needed
-
         const dpr = CURRENT_DPR;
         requestAnimationFrame(() => {
-          // group by color
           const groups = new Map();
-          for (const r of rects) {
-            const color = r.color || 'yellow';
-            if (!groups.has(color)) groups.set(color, []);
-            groups.get(color).push(r);
-          }
+          for (const r of rects) { const color=r.color||'yellow'; if(!groups.has(color)) groups.set(color, []); groups.get(color).push(r); }
           for (const [color, arr] of groups) {
             ctx.fillStyle = color;
             for (const r of arr) {
-              const w = r.w ?? r.width, h = r.h ?? r.height;
-              const [vx1, vy1] = cssViewport.convertToViewportPoint(r.x,     r.y);
-              const [vx2, vy2] = cssViewport.convertToViewportPoint(r.x + w, r.y + h);
-              const leftDev   = Math.round(Math.min(vx1, vx2) * dpr);
-              const topDev    = Math.round(Math.min(vy1, vy2) * dpr);
-              const widthDev  = Math.max(1, Math.round(Math.abs(vx2 - vx1) * dpr));
-              const heightDev = Math.max(1, Math.round(Math.abs(vy2 - vy1) * dpr));
+              const w=r.w??r.width, h=r.h??r.height;
+              const [vx1, vy1] = cssViewport.convertToViewportPoint(r.x, r.y);
+              const [vx2, vy2] = cssViewport.convertToViewportPoint(r.x+w, r.y+h);
+              const leftDev=Math.round(Math.min(vx1,vx2)*dpr);
+              const topDev=Math.round(Math.min(vy1,vy2)*dpr);
+              const widthDev=Math.max(1, Math.round(Math.abs(vx2-vx1)*dpr));
+              const heightDev=Math.max(1, Math.round(Math.abs(vy2-vy1)*dpr));
               ctx.fillRect(leftDev, topDev, widthDev, heightDev);
             }
           }
         });
       }
 
-      // ---- Bootstrap: jump to requested page and compute initial window ----
-      const startIndex = Math.min(total, Math.max(1, startAt)) - 1;
-      slots[startIndex].slot.scrollIntoView({ block: 'start' });
+      // Kick initial window around the already-rendered page
       updateActiveWindow();
 
-      // ---- Handle resize / DPR changes: re-render only the active window ----
+      // Handle resize / DPR changes
       window.addEventListener('resize', () => {
-        const newDpr = getDPR();
-        if (Math.abs(newDpr - CURRENT_DPR) > 0.001) {
-          CURRENT_DPR = newDpr;
-        }
+        const newDpr = getDPR(); if (Math.abs(newDpr - CURRENT_DPR) > 0.001) CURRENT_DPR = newDpr;
         const center = nearestVisiblePage();
         const minP = Math.max(1, center - ACTIVE_RADIUS);
         const maxP = Math.min(total, center + ACTIVE_RADIUS);
-        for (let p = minP; p <= maxP; p++) {
-          if (rendered.has(p)) {
-            destroyWrapper(p);
-            rendered.delete(p);
-            queueRender(p);
-          }
-        }
+        for (let p=minP; p<=maxP; p++){ if(rendered.has(p)){ destroyWrapper(p); rendered.delete(p); queueRender(p);} }
       });
 
-      // ---- Clean up on unload ----
-      window.addEventListener('beforeunload', () => {
-        try { loadingTask?.destroy(); } catch {}
-      });
+      window.addEventListener('beforeunload', () => { try { loadingTask?.destroy(); } catch {} });
     })();
   </script>
 </body>
