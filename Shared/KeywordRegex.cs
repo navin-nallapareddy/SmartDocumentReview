@@ -12,34 +12,36 @@ namespace SmartDocumentReview.Shared
         public const string WordCharClass = @"\p{L}\p{N}_\u2019'-";
 
         /// <summary>
-        /// Builds a compiled regex that matches any of the keywords as whole words,
-        /// using negative lookbehind/lookahead with the shared word-class.
-        /// Each alternative is named (?&lt;k{i}&gt;...) so we can map match-&gt;keyword reliably.
+        /// Compiled regex that matches any of the keywords as whole words using the shared word-class.
+        /// Each alternative is named (?<k{i}>...) so we can map match->keyword reliably.
         /// </summary>
         public static Regex BuildWholeWordRegex(IEnumerable<string> keywords, RegexOptions extra = RegexOptions.None)
         {
             var groups = keywords.Select((kw, i) => $"(?<k{i}>{Regex.Escape(kw)})");
             var pattern = $@"(?<![{WordCharClass}])(?:{string.Join("|", groups)})(?![{WordCharClass}])";
-            return new Regex(pattern,
+            return new Regex(
+                pattern,
                 RegexOptions.CultureInvariant |
                 RegexOptions.IgnoreCase |
                 RegexOptions.Compiled |
-                extra);
+                extra
+            );
         }
 
         /// <summary>
-        /// Builds a compiled regex that matches any of the keywords as partial substrings.
-        /// Also uses named groups (?&lt;k{i}&gt;...) for match-&gt;keyword mapping.
+        /// Compiled regex that matches any of the keywords as partial substrings (named groups too).
         /// </summary>
         public static Regex BuildPartialRegex(IEnumerable<string> keywords, RegexOptions extra = RegexOptions.None)
         {
             var groups = keywords.Select((kw, i) => $"(?<k{i}>{Regex.Escape(kw)})");
             var pattern = $"(?:{string.Join("|", groups)})";
-            return new Regex(pattern,
+            return new Regex(
+                pattern,
                 RegexOptions.CultureInvariant |
                 RegexOptions.IgnoreCase |
                 RegexOptions.Compiled |
-                extra);
+                extra
+            );
         }
     }
 }
