@@ -15,15 +15,9 @@ namespace SmartDocumentReview.Pages
             public int Length => End - Start;
         }
 
-        /// <summary>
-        /// Convenience wrapper if your .razor passes a color dictionary.
-        /// </summary>
         protected MarkupString HighlightKeywords(string text, IEnumerable<Keyword> keywords, IDictionary<Keyword, string> colorMap)
             => BuildHighlights(text, keywords, k => colorMap[k]);
 
-        /// <summary>
-        /// Build safe, accurate multi-keyword highlights for the given text.
-        /// </summary>
         protected MarkupString BuildHighlights(string text, IEnumerable<Keyword> keywords, Func<Keyword, string> colorForKeyword)
         {
             if (string.IsNullOrEmpty(text) || keywords is null)
@@ -46,13 +40,11 @@ namespace SmartDocumentReview.Pages
                 Collect(rxPart, text, partKw, matches);
             }
 
-            // Sort deterministic: start asc, length desc
             var ordered = matches
                 .OrderBy(m => m.Start)
                 .ThenByDescending(m => m.Length)
                 .ToList();
 
-            // Dedupe identical spans; skip true overlaps (keep earlier/longer)
             var canonical = new List<Hit>(ordered.Count);
             var seen = new HashSet<(int s, int e)>();
             int lastEnd = -1;
@@ -65,7 +57,6 @@ namespace SmartDocumentReview.Pages
                 lastEnd = m.End;
             }
 
-            // Build HTML (use Substring to satisfy HtmlEncoder API)
             var sb = new StringBuilder(text.Length + canonical.Count * 40);
             int cursor = 0;
 
@@ -85,9 +76,6 @@ namespace SmartDocumentReview.Pages
             return new MarkupString(sb.ToString());
         }
 
-        /// <summary>
-        /// Map named-group matches back to their Keyword instances.
-        /// </summary>
         private static void Collect(Regex rx, string text, List<Keyword> sourceKeywords, List<Hit> sink)
         {
             foreach (Match m in rx.Matches(text))
@@ -98,7 +86,7 @@ namespace SmartDocumentReview.Pages
                     if (g.Success)
                     {
                         sink.Add(new Hit(g.Index, g.Index + g.Length, sourceKeywords[i]));
-                        break; // exactly one will be set
+                        break;
                     }
                 }
             }
