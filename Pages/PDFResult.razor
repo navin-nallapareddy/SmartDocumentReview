@@ -12,7 +12,6 @@
 <h3>Matched Results</h3>
 
 <div style="display: flex; height: 90vh;">
-    <!-- Left: Match Results -->
     <div style="width: 40%; overflow-y: auto; padding: 1rem;">
         @foreach (var match in ResultStateService.Matches)
         {
@@ -26,7 +25,6 @@
         }
     </div>
 
-    <!-- Right: PDF Viewer -->
     <div style="width: 60%; height: 100%;">
         <iframe id="pdfViewer" width="100%" height="100%" frameborder="0"></iframe>
     </div>
@@ -42,7 +40,6 @@
         var keywords = ResultStateService.Keywords;
         keywordColors = keywords.Select((k, i) => new { k, i }).ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
 
-        // Load first match by default after render
         if (ResultStateService.Matches.Count > 0)
         {
             var first = ResultStateService.Matches[0];
@@ -73,14 +70,12 @@
         if (string.IsNullOrWhiteSpace(text))
             return (MarkupString)HtmlEncoder.Default.Encode(text ?? string.Empty);
 
-        // Use the same keywords/colors currently shown in the UI
         var allKeywords = keywordColors.Keys.ToList();
         var wholeKw = allKeywords.Where(k => !k.AllowPartial).ToList();
         var partKw  = allKeywords.Where(k =>  k.AllowPartial).ToList();
 
         var ranges = new List<(int start, int end, string color)>(32);
 
-        // Collect matches using named groups (?<k{i}>) to map back to the right keyword/color
         static void Collect(Regex rx, string sourceText, List<Keyword> srcKeywords, Dictionary<Keyword,string> colors, List<(int,int,string)> sink)
         {
             foreach (Match m in rx.Matches(sourceText))
@@ -92,7 +87,7 @@
                     {
                         var kw = srcKeywords[i];
                         sink.Add((g.Index, g.Index + g.Length, colors[kw]));
-                        break; // exactly one group will be set
+                        break;
                     }
                 }
             }
@@ -112,13 +107,11 @@
         if (ranges.Count == 0)
             return (MarkupString)HtmlEncoder.Default.Encode(text);
 
-        // Deterministic ordering: start asc, then longer first
         var ordered = ranges
             .OrderBy(r => r.start)
             .ThenByDescending(r => r.end - r.start)
             .ToList();
 
-        // Dedupe exact spans; skip true overlaps (keep earlier/longer)
         var sb = new StringBuilder(text.Length + ordered.Count * 40);
         var seen = new HashSet<(int s, int e)>();
         int cursor = 0;
@@ -130,9 +123,9 @@
             if (r.start < lastEnd) continue;
 
             if (cursor < r.start)
-                sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor, r.start - cursor)));
+                sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor, r.start - cursor)));
 
-            var encodedMatch = HtmlEncoder.Default.Encode(text.AsSpan(r.start, r.end - r.start));
+            var encodedMatch = HtmlEncoder.Default.Encode(text.Substring(r.start, r.end - r.start));
             sb.Append($"<mark style='background-color:{r.color}'>{encodedMatch}</mark>");
 
             cursor = r.end;
@@ -140,7 +133,7 @@
         }
 
         if (cursor < text.Length)
-            sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor)));
+            sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor)));
 
         return (MarkupString)sb.ToString();
     }
