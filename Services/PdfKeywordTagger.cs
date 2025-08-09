@@ -19,7 +19,6 @@ namespace SmartDocumentReview.Services
         {
             var matches = new List<TagMatch>();
 
-            // Copy the incoming stream so we can reuse it for OCR if needed
             using var memory = new MemoryStream();
             pdfStream.CopyTo(memory);
             var bytes = memory.ToArray();
@@ -29,7 +28,6 @@ namespace SmartDocumentReview.Services
 
             using var pdf = PdfDocument.Open(memory);
 
-            // Pre-split keywords once
             var wholeKw = keywords.Where(k => !k.AllowPartial).ToList();
             var partKw  = keywords.Where(k =>  k.AllowPartial).ToList();
 
@@ -38,7 +36,6 @@ namespace SmartDocumentReview.Services
                 var page = pdf.GetPage(i);
                 var letters = page.Letters;
 
-                // Build page text + letter-index spans so we can compute bounding boxes reliably
                 var pageTextBuilder = new StringBuilder();
                 var spans = new List<(int start, int end, Letter letter)>();
                 int offset = 0;
@@ -52,19 +49,15 @@ namespace SmartDocumentReview.Services
 
                 var pageText = pageTextBuilder.ToString();
 
-                // If no text was extracted, fall back to OCR for this page
                 if (string.IsNullOrWhiteSpace(pageText))
                 {
                     pageText = RunOcr(tempPdf, i);
-                    spans.Clear(); // no glyphs available from OCR text
+                    spans.Clear();
                 }
 
                 var sectionTitle = $"Page {i}";
-
-                // --- Unified multi-keyword matching (one pass per class) ----------------------
                 var rawHits = new List<(int start, int end, Keyword kw)>(64);
 
-                // Helper to collect matches with named groups (?<k{i}>) so we can map to the right Keyword
                 static void Collect(Regex rx, string text, List<Keyword> srcKw, List<(int start, int end, Keyword kw)> sink)
                 {
                     foreach (Match m in rx.Matches(text))
@@ -75,7 +68,7 @@ namespace SmartDocumentReview.Services
                             if (g.Success)
                             {
                                 sink.Add((g.Index, g.Index + g.Length, srcKw[gi]));
-                                break; // only one named group will be set
+                                break;
                             }
                         }
                     }
@@ -94,8 +87,6 @@ namespace SmartDocumentReview.Services
 
                 if (rawHits.Count == 0) continue;
 
-                // Deterministic ordering & conflict resolution:
-                // 1) sort by start asc, 2) length desc; 3) dedupe exact spans; 4) skip true overlaps
                 var ordered = rawHits
                     .OrderBy(h => h.start)
                     .ThenByDescending(h => h.end - h.start)
@@ -107,13 +98,12 @@ namespace SmartDocumentReview.Services
 
                 foreach (var h in ordered)
                 {
-                    if (!seen.Add((h.start, h.end))) continue; // skip identical span dupes
-                    if (h.start < lastEnd) continue;            // skip overlaps (earlier/longer already kept)
+                    if (!seen.Add((h.start, h.end))) continue;
+                    if (h.start < lastEnd) continue;
                     canonical.Add(h);
                     lastEnd = h.end;
                 }
 
-                // Map canonical text ranges to rectangles (when glyphs exist), extract context, and emit TagMatch
                 foreach (var h in canonical)
                 {
                     double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
@@ -134,7 +124,6 @@ namespace SmartDocumentReview.Services
                         }
                     }
 
-                    // Extract matched context (±60 characters around the match)
                     var ctxStart = Math.Max(0, h.start - 60);
                     var ctxEnd   = Math.Min(pageText.Length, h.end + 60);
                     var context  = pageText.Substring(ctxStart, ctxEnd - ctxStart);
@@ -150,7 +139,7 @@ namespace SmartDocumentReview.Services
                         PageX        = (float)x1,
                         PageY        = (float)y1,
                         Width        = (float)(x2 - x1)
-                        // If TagMatch has Height: Height = (float)(y2 - y1)
+                        // If you add Height: Height = (float)(y2 - y1)
                     });
                 }
             }
