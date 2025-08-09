@@ -81,6 +81,13 @@
       const t0 = performance.now();
       const mark = (msg) => console.log(`[perf] ${msg}: ${(performance.now()-t0).toFixed(1)}ms`);
 
+      // Safari/older browsers: requestIdleCallback polyfill
+      const _rIC = window.requestIdleCallback || function (cb, opts) {
+        return setTimeout(() => cb({ timeRemaining: () => 0, didTimeout: true }), (opts && opts.timeout) || 0);
+      };
+      const _cIC = window.cancelIdleCallback || function (id) { clearTimeout(id); };
+      const idleTick = (timeout = 50) => new Promise((resolve) => _rIC(resolve, { timeout }));
+
       // Verify worker actually loads (fallback = very slow)
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
       mark('worker configured');
@@ -213,12 +220,12 @@
         const BATCH = 200;
         // before
         for (let i = startP - 1; i >= 1; i -= BATCH) {
-          await new Promise(r => requestIdleCallback(r, { timeout: 50 }));
+          await idleTick(50);
           for (let p = Math.max(1, i - BATCH + 1); p <= i; p++) addSlot(p);
         }
         // after
         for (let i = startP + 1; i <= total; i += BATCH) {
-          await new Promise(r => requestIdleCallback(r, { timeout: 50 }));
+          await idleTick(50);
           for (let p = i; p <= Math.min(total, i + BATCH - 1); p++) addSlot(p);
         }
       }
@@ -244,7 +251,7 @@
         slots[p - 1] = { slot: s, container: c, wrapper: null };
       }
 
-      await buildSlotsInBatches();
+      try { await buildSlotsInBatches(); } catch (e) { console.warn('slot build interrupted', e); }
       mark('all placeholders built');
 
       // ---- IntersectionObserver (observe only after slots exist) ----
