@@ -1,4 +1,3 @@
-// File: Services/PdfKeywordTagger.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +8,6 @@ using System.IO;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using SmartDocumentReview.Models;
-using SmartDocumentReview.Shared; // unified regex helpers
 
 namespace SmartDocumentReview.Services
 {
@@ -19,6 +17,7 @@ namespace SmartDocumentReview.Services
         {
             var matches = new List<TagMatch>();
 
+            // Copy the incoming stream so we can reuse it for OCR if needed
             using var memory = new MemoryStream();
             pdfStream.CopyTo(memory);
             var bytes = memory.ToArray();
@@ -27,9 +26,6 @@ namespace SmartDocumentReview.Services
             memory.Position = 0;
 
             using var pdf = PdfDocument.Open(memory);
-
-            var wholeKw = keywords.Where(k => !k.AllowPartial).ToList();
-            var partKw  = keywords.Where(k =>  k.AllowPartial).ToList();
 
             for (int i = 1; i <= pdf.NumberOfPages; i++)
             {
@@ -49,6 +45,7 @@ namespace SmartDocumentReview.Services
 
                 var pageText = pageTextBuilder.ToString();
 
+                // If no text was extracted, fall back to Tesseract OCR
                 if (string.IsNullOrWhiteSpace(pageText))
                 {
                     pageText = RunOcr(tempPdf, i);
@@ -56,92 +53,52 @@ namespace SmartDocumentReview.Services
                 }
 
                 var sectionTitle = $"Page {i}";
-                var rawHits = new List<(int start, int end, Keyword kw)>(64);
 
-                static void Collect(Regex rx, string text, List<Keyword> srcKw, List<(int start, int end, Keyword kw)> sink)
+                foreach (var keyword in keywords)
                 {
-                    foreach (Match m in rx.Matches(text))
+                    var escaped = Regex.Escape(keyword.Text);
+                    // Custom boundaries when partial matches aren't allowed
+                    var pattern = keyword.AllowPartial
+                        ? escaped
+                        : $@"(?<![\p{{L}}\p{{N}}_\u2019'-]){escaped}(?![\p{{L}}\p{{N}}_\u2019'-])";
+
+                    var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+                    foreach (Match match in regex.Matches(pageText))
                     {
-                        for (int gi = 0; gi < srcKw.Count; gi++)
-                        {
-                            var g = m.Groups[$"k{gi}"];
-                            if (g.Success)
-                            {
-                                sink.Add((g.Index, g.Index + g.Length, srcKw[gi]));
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (wholeKw.Count > 0)
-                {
-                    var rxWhole = KeywordRegex.BuildWholeWordRegex(wholeKw.Select(k => k.Text));
-                    Collect(rxWhole, pageText, wholeKw, rawHits);
-                }
-                if (partKw.Count > 0)
-                {
-                    var rxPart = KeywordRegex.BuildPartialRegex(partKw.Select(k => k.Text));
-                    Collect(rxPart, pageText, partKw, rawHits);
-                }
-
-                if (rawHits.Count == 0) continue;
-
-                var ordered = rawHits
-                    .OrderBy(h => h.start)
-                    .ThenByDescending(h => h.end - h.start)
-                    .ToList();
-
-                var canonical = new List<(int start, int end, Keyword kw)>(ordered.Count);
-                var seen = new HashSet<(int s, int e)>();
-                int lastEnd = -1;
-
-                foreach (var h in ordered)
-                {
-                    if (!seen.Add((h.start, h.end))) continue;
-                    if (h.start < lastEnd) continue;
-                    canonical.Add(h);
-                    lastEnd = h.end;
-                }
-
-                foreach (var h in canonical)
-                {
-                    double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-
-                    if (spans.Count > 0)
-                    {
-                        var relevantRects = spans
-                            .Where(s => s.start < h.end && s.end > h.start)
+                        double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+                        var relevant = spans
+                            .Where(s => s.start < match.Index + match.Length && s.end > match.Index)
                             .Select(s => s.letter.GlyphRectangle)
                             .ToList();
 
-                        if (relevantRects.Count > 0)
+                        if (relevant.Count > 0)
                         {
-                            x1 = relevantRects.Min(r => r.Left);
-                            y1 = relevantRects.Min(r => r.Bottom);
-                            x2 = relevantRects.Max(r => r.Right);
-                            y2 = relevantRects.Max(r => r.Top);
+                            x1 = relevant.Min(r => r.Left);
+                            y1 = relevant.Min(r => r.Bottom);
+                            x2 = relevant.Max(r => r.Right);
+                            y2 = relevant.Max(r => r.Top);
                         }
+
+                        // Extract matched context (±60 characters around the match)
+                        var start = Math.Max(0, match.Index - 60);
+                        var end = Math.Min(pageText.Length, match.Index + match.Length + 60);
+                        var context = pageText.Substring(start, end - start);
+
+                        matches.Add(new TagMatch
+                        {
+                            Keyword = keyword.Text,
+                            SectionTitle = sectionTitle,
+                            MatchedText = context,
+                            CreatedBy = createdBy,
+                            CreatedAt = DateTime.UtcNow,
+                            PageNumber = i,
+                            PageX = (float)x1,
+                            PageY = (float)y1,
+                            Width = (float)(x2 - x1),
+                            Height = (float)(y2 - y1) // NEW for overlay drawing
+                        });
                     }
-
-                    var ctxStart = Math.Max(0, h.start - 60);
-                    var ctxEnd   = Math.Min(pageText.Length, h.end + 60);
-                    var context  = pageText.Substring(ctxStart, ctxEnd - ctxStart);
-
-                    matches.Add(new TagMatch
-                    {
-                        Keyword      = h.kw.Text,
-                        SectionTitle = sectionTitle,
-                        MatchedText  = context,
-                        CreatedBy    = createdBy,
-                        CreatedAt    = DateTime.UtcNow,
-                        PageNumber   = i,
-                        PageX        = (float)x1,
-                        PageY        = (float)y1,
-                        Width        = (float)(x2 - x1)
-                        // If you add Height: Height = (float)(y2 - y1)
-                            Height = (float)(y2 - y1) // NEW
-                    });
                 }
             }
 
