@@ -12,6 +12,7 @@
 <h3>Matched Results</h3>
 
 <div style="display: flex; height: 90vh;">
+    <!-- Left: Match Results -->
     <div style="width: 40%; overflow-y: auto; padding: 1rem;">
         @foreach (var match in ResultStateService.Matches)
         {
@@ -25,6 +26,7 @@
         }
     </div>
 
+    <!-- Right: PDF Viewer -->
     <div style="width: 60%; height: 100%;">
         <iframe id="pdfViewer" width="100%" height="100%" frameborder="0"></iframe>
     </div>
@@ -38,12 +40,12 @@
     protected override void OnInitialized()
     {
         var keywords = ResultStateService.Keywords;
-        keywordColors = keywords.Select((k, i) => new { k, i }).ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
+        keywordColors = keywords.Select((k, i) => new { k, i })
+                                .ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
 
         if (ResultStateService.Matches.Count > 0)
         {
-            var first = ResultStateService.Matches[0];
-            _pendingPage = first.PageNumber;
+            _pendingPage = ResultStateService.Matches[0].PageNumber;
         }
     }
 
@@ -59,9 +61,8 @@
     async Task LoadPdfAsync(int page)
     {
         var file = "/uploads/latest.pdf";
-        var highlightParams = string.Join("&", keywordColors.Select(kvp =>
-            $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
-        var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
+        var overlay = "/uploads/latest-highlights.json"; // Use same overlay as Upload.razor
+        var viewerUrl = $"/pdfjs/index.html?file={Uri.EscapeDataString(file)}&page={page}&overlay={Uri.EscapeDataString(overlay)}";
         await JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
 
