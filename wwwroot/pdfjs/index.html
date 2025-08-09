@@ -252,6 +252,7 @@
       }
 
       try { await buildSlotsInBatches(); } catch (e) { console.warn('slot build interrupted', e); }
+      viewerContainer.scrollTop = slots[startP - 1].slot.offsetTop;
       mark('all placeholders built');
 
       // ---- IntersectionObserver (observe only after slots exist) ----
