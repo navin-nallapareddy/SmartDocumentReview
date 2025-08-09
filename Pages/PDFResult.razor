@@ -62,7 +62,8 @@
     async Task LoadPdfAsync(int page)
     {
         var file = "/uploads/latest.pdf";
-        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
+        var highlightParams = string.Join("&", keywordColors.Select(kvp =>
+            $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
         var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
         await JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
