@@ -1,111 +1,155 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8" />
   <title>PDF Viewer</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf_viewer.min.css" />
   <style>
     html, body { margin: 0; height: 100%; }
-    #viewerContainer { position: relative; width: 100%; height: 100%; overflow: auto; }
-    canvas { display: block; margin: auto; }
-    #viewerContainer .textLayer { opacity: 1 !important; }
-    .text-highlight {
+    #viewerContainer {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background: #f5f5f5;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+    .pageLayer {
+      position: relative;
+      margin: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.2);
+      background: white;
+      line-height: 0;
+    }
+    canvas {
+      display: block;
+      background: white;
+    }
+    .overlayLayer {
+      position: absolute;
+      left: 0;
+      top: 0;
+      pointer-events: none; /* allow clicks to pass through */
+    }
+    .hl {
+      position: absolute;
+      opacity: .35; /* translucency for highlights */
       mix-blend-mode: multiply;
     }
   </style>
 </head>
 <body>
-  <div id="viewerContainer"></div>
+  <div id="viewerContainer">
+    <div id="pageWrapper" class="pageLayer">
+      <canvas id="the-canvas"></canvas>
+      <div id="overlay" class="overlayLayer"></div>
+    </div>
+  </div>
+
+  <!-- PDF.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
   <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const file = urlParams.get('file') || '';
-    const page = parseInt(urlParams.get('page') || '1', 10);
-    const highlights = urlParams.getAll('highlight');
-    const colors = urlParams.getAll('color');
-    const partials = urlParams.getAll('partial');
-    const container = document.getElementById('viewerContainer');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+    (async function () {
+      const urlParams = new URLSearchParams(location.search);
+      const file    = urlParams.get('file')    || '';
+      const pageNum = parseInt(urlParams.get('page') || '1', 10);
+      const overlay = urlParams.get('overlay') || ''; // e.g. /uploads/latest-highlights.json
 
-    pdfjsLib.getDocument(file).promise.then(pdf => {
-      pdf.getPage(page).then(p => {
-        const viewport = p.getViewport({ scale: 1.5 });
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        container.appendChild(canvas);
+      if (!file) {
+        console.error('Missing ?file=... parameter');
+        return;
+      }
 
-        const textLayerDiv = document.createElement('div');
-        textLayerDiv.className = 'textLayer';
-        container.appendChild(textLayerDiv);
+      // Configure worker
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
 
-        p.render({ canvasContext: context, viewport });
+      // Elements
+      const pageWrapper = document.getElementById('pageWrapper');
+      const canvas = document.getElementById('the-canvas');
+      const overlayDiv = document.getElementById('overlay');
+      const ctx = canvas.getContext('2d');
 
-        p.getTextContent().then(textContent => {
-          const textDivs = [];
-          pdfjsLib.renderTextLayer({
-            textContent,
-            container: textLayerDiv,
-            viewport,
-            textDivs
-          }).promise.then(() => {
-            if (highlights.length > 0) {
-              const spans = textDivs;
-              let fullText = '';
-              const spanRanges = spans.map((span, idx) => {
-                const start = fullText.length;
-                const str = textContent.items[idx].str;
-                fullText += str;
-                return { start, end: fullText.length };
-              });
-              const perSpan = spans.map(() => []);
-              highlights.forEach((h, i) => {
-                const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const allowPartial = partials[i] === 'true';
-                const regex = new RegExp(allowPartial ? escaped : `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu');
-                let match;
-                while ((match = regex.exec(fullText)) !== null) {
-                  const start = match.index;
-                  const end = start + match[0].length;
-                  spanRanges.forEach((range, idx) => {
-                    if (range.start < end && range.end > start) {
-                      const localStart = Math.max(start, range.start) - range.start;
-                      const localEnd = Math.min(end, range.end) - range.start;
-                      perSpan[idx].push({ start: localStart, end: localEnd, color: colors[i] || 'rgba(255,255,0,0.4)' });
-                    }
-                  });
-                }
-              });
-              perSpan.forEach((ranges, idx) => {
-                if (ranges.length === 0) return;
-                const text = spans[idx].textContent;
-                const charColors = new Array(text.length).fill(null);
+      // Device pixel ratio for crisper rendering
+      const CSS_SCALE = 1.5;
+      const DPR = window.devicePixelRatio || 1;
 
-                ranges.forEach(r => {
-                  for (let i = r.start; i < r.end && i < charColors.length; i++) {
-                    charColors[i] = r.color || 'rgba(255,255,0,0.4)';
-                  }
-                });
+      // Load PDF + page
+      const pdf = await pdfjsLib.getDocument(file).promise;
+      const page = await pdf.getPage(pageNum);
 
-                let result = '';
-                let current = null;
-                for (let i = 0; i < text.length; i++) {
-                  const color = charColors[i];
-                  if (color !== current) {
-                    if (current !== null) result += '</span>';
-                    if (color !== null) result += `<span class="text-highlight" style="background-color: ${color}; opacity:0.5;">`;
-                    current = color;
-                  }
-                  result += text[i];
-                }
-                if (current !== null) result += '</span>';
-                spans[idx].innerHTML = result;
-              });
-            }
-          });
-        });
-      });
-    });
+      // Build viewport (PDF points -> CSS pixels)
+      const viewport = page.getViewport({ scale: CSS_SCALE });
+
+      // Size canvas with DPR for sharpness
+      canvas.width  = Math.floor(viewport.width  * DPR);
+      canvas.height = Math.floor(viewport.height * DPR);
+      canvas.style.width  = Math.floor(viewport.width)  + 'px';
+      canvas.style.height = Math.floor(viewport.height) + 'px';
+
+      // Size overlay to match canvas CSS size
+      overlayDiv.style.width  = canvas.style.width;
+      overlayDiv.style.height = canvas.style.height;
+
+      // Fit wrapper around the page size
+      pageWrapper.style.width  = canvas.style.width;
+      pageWrapper.style.height = canvas.style.height;
+
+      // Render the page
+      await page.render({
+        canvasContext: ctx,
+        viewport: page.getViewport({ scale: CSS_SCALE * DPR }) // render at DPR scale
+      }).promise;
+
+      // Load overlay JSON (per-page highlights)
+      let rects = [];
+      if (overlay) {
+        try {
+          const res = await fetch(overlay, { cache: 'no-store' });
+          const byPage = await res.json();
+          rects = byPage[String(pageNum)] || byPage[pageNum] || [];
+        } catch (e) {
+          console.warn('Could not load overlay JSON:', e);
+        }
+      }
+
+      // Helper: convert PDF coordinates (origin bottom-left, units in PDF points)
+      // to CSS pixels for the overlay (origin top-left)
+      function pdfRectToCss(x, y, w, h) {
+        // First, PDF points -> CSS px using viewport scale
+        const sx = CSS_SCALE; // viewport.scale (CSS)
+        const sy = CSS_SCALE;
+
+        const cssX = x * sx;
+        const cssW = w * sx;
+
+        // Y needs inversion because PDF origin is bottom-left; CSS is top-left.
+        // PDF page height in CSS pixels:
+        const pageHeightCss = viewport.height;
+        const cssY = (pageHeightCss - (y + h) * sy);
+        const cssH = h * sy;
+
+        return { left: cssX, top: cssY, width: cssW, height: cssH };
+      }
+
+      // Draw rectangles
+      overlayDiv.innerHTML = '';
+      for (const r of rects) {
+        const { left, top, width, height } = pdfRectToCss(r.x, r.y, r.w, r.h);
+        const div = document.createElement('div');
+        div.className = 'hl';
+        div.style.left   = left   + 'px';
+        div.style.top    = top    + 'px';
+        div.style.width  = width  + 'px';
+        div.style.height = height + 'px';
+        div.style.background = r.color || 'yellow';
+        overlayDiv.appendChild(div);
+      }
+
+      // Optional: handle window resize (keeps current simple; full re-render is best)
+      // In most app shells, the iframe isn't resized frequently, so we omit it for now.
+    })();
   </script>
 </body>
 </html>
