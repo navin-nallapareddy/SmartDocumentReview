@@ -3,8 +3,8 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
-using SmartDocumentReview.Shared;  // for KeywordRegex
-using SmartDocumentReview.Models;  // for Keyword
+using SmartDocumentReview.Shared;  // KeywordRegex
+using SmartDocumentReview.Models;  // Keyword
 
 namespace SmartDocumentReview.Pages
 {
@@ -60,14 +60,14 @@ namespace SmartDocumentReview.Pages
                 lastEnd = m.End;
             }
 
-            // Build the final HTML
+            // Build the final HTML (use Substring to satisfy HtmlEncoder API)
             var sb = new StringBuilder(text.Length + canonical.Count * 40);
             int cursor = 0;
 
             foreach (var m in canonical)
             {
                 if (cursor < m.Start)
-                    sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor, m.Start - cursor)));
+                    sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor, m.Start - cursor)));
 
                 var encoded = HtmlEncoder.Default.Encode(text.Substring(m.Start, m.Length));
                 sb.Append($"<mark style=\"background-color:{colorForKeyword(m.Keyword)}\">{encoded}</mark>");
@@ -75,7 +75,7 @@ namespace SmartDocumentReview.Pages
             }
 
             if (cursor < text.Length)
-                sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor)));
+                sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor)));
 
             return new MarkupString(sb.ToString());
         }
@@ -87,6 +87,19 @@ namespace SmartDocumentReview.Pages
         {
             foreach (Match m in rx.Matches(text))
             {
+                for (int i = 0; i < sourceKeywords.Count; i++)
+                {
+                    var g = m.Groups[$"k{i}"];
+                    if (g.Success)
+                    {
+                        sink.Add(new Hit(g.Index, g.Index + g.Length, sourceKeywords[i]));
+                        break; // only one group matches
+                    }
+                }
+            }
+        }
+    }
+}
                 for (int i = 0; i < sourceKeywords.Count; i++)
                 {
                     var g = m.Groups[$"k{i}"];
