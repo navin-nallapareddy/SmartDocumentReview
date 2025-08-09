@@ -15,10 +15,6 @@ namespace SmartDocumentReview.Pages
             public int Length => End - Start;
         }
 
-        /// <summary>
-        /// Builds safe, accurate multi-keyword highlights for the given text.
-        /// Call this from your .razor markup.
-        /// </summary>
         protected MarkupString BuildHighlights(string text, IEnumerable<Keyword> keywords, Func<Keyword, string> colorForKeyword)
         {
             if (string.IsNullOrEmpty(text) || keywords is null)
@@ -41,13 +37,11 @@ namespace SmartDocumentReview.Pages
                 CollectMatches(rxPart, text, partKw, matches);
             }
 
-            // Sort: earliest start first; for ties, prefer longer matches
             var ordered = matches
                 .OrderBy(m => m.Start)
                 .ThenByDescending(m => m.Length)
                 .ToList();
 
-            // Deduplicate identical spans; skip true overlaps
             var canonical = new List<Hit>();
             var seen = new HashSet<(int s, int e)>();
             int lastEnd = -1;
@@ -60,7 +54,6 @@ namespace SmartDocumentReview.Pages
                 lastEnd = m.End;
             }
 
-            // Build the final HTML (use Substring to satisfy HtmlEncoder API)
             var sb = new StringBuilder(text.Length + canonical.Count * 40);
             int cursor = 0;
 
@@ -80,9 +73,6 @@ namespace SmartDocumentReview.Pages
             return new MarkupString(sb.ToString());
         }
 
-        /// <summary>
-        /// Adds matches from the regex to the match list, mapping named groups back to keywords.
-        /// </summary>
         private static void CollectMatches(Regex rx, string text, List<Keyword> sourceKeywords, List<Hit> sink)
         {
             foreach (Match m in rx.Matches(text))
@@ -93,7 +83,7 @@ namespace SmartDocumentReview.Pages
                     if (g.Success)
                     {
                         sink.Add(new Hit(g.Index, g.Index + g.Length, sourceKeywords[i]));
-                        break; // only one group matches
+                        break;
                     }
                 }
             }
