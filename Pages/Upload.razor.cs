@@ -100,16 +100,3 @@ namespace SmartDocumentReview.Pages
         }
     }
 }
-                for (int i = 0; i < sourceKeywords.Count; i++)
-                {
-                    var g = m.Groups[$"k{i}"];
-                    if (g.Success)
-                    {
-                        sink.Add(new Hit(g.Index, g.Index + g.Length, sourceKeywords[i]));
-                        break; // only one group matches
-                    }
-                }
-            }
-        }
-    }
-}
