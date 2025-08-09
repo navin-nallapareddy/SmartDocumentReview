@@ -16,5 +16,7 @@ namespace SmartDocumentReview.Models
         public float PageX { get; set; }
         public float PageY { get; set; }
         public float Width { get; set; }
+        public float Height { get; set; } // NEW
+
     }
 }
