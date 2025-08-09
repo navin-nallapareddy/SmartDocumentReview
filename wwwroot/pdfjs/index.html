@@ -22,17 +22,26 @@
       min-width: 640px;
       padding: 16px 0;
     }
-    .pageOuter {
+
+    /* Virtualized placeholders; real canvases exist only for active window */
+    .pageSlot {
       margin: 16px auto;
-      width: fit-content;
+      line-height: 0; /* remove inline-gap */
+      background: transparent;
+      contain: content; /* isolate layout/paint */
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
+
     .pageLayer {
       position: relative;
       box-shadow: 0 1px 4px rgba(0,0,0,.2);
       background: white;
       line-height: 0;
+      contain: layout paint size style;
     }
-    /* Only the render canvas is white; highlight canvas is transparent */
+
     canvas { display: block; }
     .renderCanvas { background: white; z-index: 0; }
     .hlCanvas {
@@ -42,6 +51,7 @@
       background: transparent;
       z-index: 1;
     }
+
     .pageMeta {
       font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       color: #666; text-align: center; padding: 6px 0 0;
@@ -59,7 +69,7 @@
     (async function () {
       const params   = new URLSearchParams(location.search);
       const file     = params.get('file')    || '';
-      const overlay  = params.get('overlay') || ''; // e.g., /uploads/latest-highlights.json
+      const overlay  = params.get('overlay') || '';
       const startAt  = Math.max(1, parseInt(params.get('page') || '1', 10));
 
       if (!file) {
@@ -77,9 +87,11 @@
       // ---- Tuning knobs ----
       const CSS_SCALE = 1.25;                     // visual zoom (CSS pixels)
       const DPR_CAP   = 1.5;                      // cap DPR to keep canvases small
-      const DPR       = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+      const getDPR    = () => Math.min(window.devicePixelRatio || 1, DPR_CAP);
+      let   CURRENT_DPR = getDPR();
       const ACTIVE_RADIUS = 3;                    // render ±N pages around viewport
-      const CONCURRENCY   = 2;                    // how many pages render at once
+      const hw = navigator.hardwareConcurrency || 4;
+      const CONCURRENCY = Math.min(6, Math.max(2, Math.floor(hw / 2)));
 
       // ---- Load highlights once ----
       let highlightsByPage = {};
@@ -92,22 +104,76 @@
         }
       }
 
-      // ---- Open PDF with streaming + no auto-prefetch ----
+      // ---- Open PDF with streaming + larger range chunks ----
       const loadingTask = pdfjsLib.getDocument({
         url: file,
-        rangeChunkSize: 65536,     // 64KB ranged fetches
-        disableAutoFetch: true,    // don't prefetch next pages
+        rangeChunkSize: 1 << 20,   // 1 MiB ranged fetches
+        disableAutoFetch: true,    // strict windowing; no runaway prefetch
         disableStream: false,      // allow streaming
         withCredentials: false
       });
       const pdf = await loadingTask.promise;
       const total = pdf.numPages;
 
-      // ---- Build lightweight DOM shells (can do all; only a few render) ----
-      const pageDivs = [];
+      // ---- Virtualized DOM: lightweight slots only ----
+      const slots = [];
+      let estimatedCss = { width: 800, height: 1100 }; // updated after first page
       for (let p = 1; p <= total; p++) {
-        const outer = document.createElement('div');
-        outer.className = 'pageOuter';
+        const slot = document.createElement('div');
+        slot.className = 'pageSlot';
+        slot.dataset.pageNumber = String(p);
+        slot.style.width  = estimatedCss.width + 'px';
+        slot.style.height = (estimatedCss.height + 22) + 'px'; // +meta
+
+        // meta below content
+        const meta = document.createElement('div');
+        meta.className = 'pageMeta';
+        meta.textContent = `Page ${p} / ${total}`;
+
+        // container for wrapper + meta
+        const container = document.createElement('div');
+        container.style.display = 'inline-block';
+        container.appendChild(meta);
+
+        slot.appendChild(container);
+        viewer.appendChild(slot);
+        slots.push({ slot, container, wrapper: null });
+      }
+
+      // ---- IntersectionObserver to track visibility without O(N) scans ----
+      const visibleRatios = new Map(); // page -> intersectionRatio
+      const io = new IntersectionObserver(entries => {
+        for (const e of entries) {
+          const p = Number(e.target.dataset.pageNumber);
+          visibleRatios.set(p, e.isIntersecting ? e.intersectionRatio : 0);
+        }
+        scheduleWindowUpdate();
+      }, {
+        root: viewerContainer,
+        rootMargin: '200% 0px',
+        threshold: [0, 0.01, 0.25, 0.5, 0.75, 1]
+      });
+      for (const { slot } of slots) io.observe(slot);
+
+      function nearestVisiblePage() {
+        let best = 1, bestRatio = -1;
+        for (const [p, r] of visibleRatios) {
+          if (r > bestRatio) { bestRatio = r; best = p; }
+        }
+        return best;
+      }
+
+      // ---- Render queue + bookkeeping ----
+      const renderTasks = new Map(); // pageNo -> { task, page }
+      const rendered    = new Set(); // pages fully drawn
+      const pending     = new Set(); // unique page numbers
+      let inFlight = 0;
+      let centerPage = 1;
+      let firstViewportMeasured = false;
+
+      function ensureWrapper(p, cssViewport, devViewport) {
+        const entry = slots[p - 1];
+        if (entry.wrapper) return entry.wrapper;
 
         const wrapper = document.createElement('div');
         wrapper.className = 'pageLayer';
@@ -122,150 +188,106 @@
         wrapper.appendChild(renderCanvas);
         wrapper.appendChild(hlCanvas);
 
-        const meta = document.createElement('div');
-        meta.className = 'pageMeta';
-        meta.textContent = `Page ${p} / ${total}`;
+        // Insert wrapper above meta inside the slot's container
+        entry.container.insertBefore(wrapper, entry.container.firstChild);
+        entry.wrapper = wrapper;
 
-        outer.appendChild(wrapper);
-        outer.appendChild(meta);
-        viewer.appendChild(outer);
-        pageDivs.push(wrapper);
+        return wrapper;
       }
 
-      // ---- Render queue + bookkeeping ----
-      const renderTasks = new Map(); // pageNo -> { task, page }
-      const rendered    = new Set(); // pages fully drawn
-      const pending     = [];        // FIFO of page numbers
-      let inFlight = 0;
+      function destroyWrapper(p) {
+        const entry = slots[p - 1];
+        if (!entry.wrapper) return;
+        entry.container.removeChild(entry.wrapper);
+        entry.wrapper = null;
+      }
 
-      function queueRender(pageNumber) {
-        // Don't double-queue
-        if (pending.includes(pageNumber) || renderTasks.has(pageNumber) || rendered.has(pageNumber)) return;
-        pending.push(pageNumber);
+      function queueRender(p) {
+        if (pending.has(p) || renderTasks.has(p) || rendered.has(p)) return;
+        pending.add(p);
         pump();
       }
 
-      async function pump() {
-        if (inFlight >= CONCURRENCY || pending.length === 0) return;
-
-        const p = pending.shift();
-        inFlight++;
-
-        const wrapper      = pageDivs[p - 1];
-        const renderCanvas = wrapper.querySelector('.renderCanvas');
-        const hlCanvas     = wrapper.querySelector('.hlCanvas');
-
-        try {
-          const page = await pdf.getPage(p);
-
-          // Viewports
-          const cssViewport = page.getViewport({ scale: CSS_SCALE });           // CSS px
-          const devViewport = page.getViewport({ scale: CSS_SCALE * DPR });     // device px
-
-          // Size canvases
-          renderCanvas.width  = Math.floor(devViewport.width);
-          renderCanvas.height = Math.floor(devViewport.height);
-          renderCanvas.style.width  = Math.floor(cssViewport.width)  + 'px';
-          renderCanvas.style.height = Math.floor(cssViewport.height) + 'px';
-
-          hlCanvas.width  = renderCanvas.width;
-          hlCanvas.height = renderCanvas.height;
-          hlCanvas.style.width  = renderCanvas.style.width;
-          hlCanvas.style.height = renderCanvas.style.height;
-
-          // Fit wrapper to CSS size
-          wrapper.style.width  = renderCanvas.style.width;
-          wrapper.style.height = renderCanvas.style.height;
-
-          const ctx = renderCanvas.getContext('2d', { alpha: false });
-
-          // Kick off render (storable so we can cancel)
-          const task = page.render({ canvasContext: ctx, viewport: devViewport });
-          renderTasks.set(p, { task, page });
-
-          await task.promise;               // throws if canceled
-          renderTasks.delete(p);
-
-          // If page is still near viewport, draw highlights; else free it
-          if (Math.abs(p - nearestVisiblePage()) <= ACTIVE_RADIUS) {
-            const rects = (highlightsByPage[String(p)] || highlightsByPage[p] || []);
-            drawHighlights(hlCanvas, rects, cssViewport);
-            rendered.add(p);
-          } else {
-            // went off-screen; free resources
-            page.cleanup();
-            // also free canvases to reclaim memory
-            clearCanvases(wrapper);
-          }
-        } catch (err) {
-          // Ignore cancellations; log others
-          if (err && !String(err).includes('Rendering cancelled')) {
-            console.warn('Render error on page', p, err);
-          }
-        } finally {
-          inFlight--;
-          pump();
+      function pickNextPage() {
+        let best = null, bestScore = Infinity;
+        for (const p of pending) {
+          const score = Math.abs(p - centerPage);
+          if (score < bestScore) { bestScore = score; best = p; }
         }
-      }
-
-      // ---- Highlight drawing (canvas, rotation-safe) ----
-      function drawHighlights(hlCanvas, rects, cssViewport) {
-        const ctx = hlCanvas.getContext('2d', { alpha: true });
-        ctx.clearRect(0, 0, hlCanvas.width, hlCanvas.height);
-        ctx.globalAlpha = 0.3;
-        ctx.globalCompositeOperation = 'multiply';
-
-        const dpr = DPR;
-        // Single frame batch
-        requestAnimationFrame(() => {
-          for (let i = 0; i < rects.length; i++) {
-            const r = rects[i];
-            const w = r.w ?? r.width;
-            const h = r.h ?? r.height;
-
-            // Convert PDF-space corners to CSS-space via PDF.js (handles rotation + origin)
-            const [vx1, vy1] = cssViewport.convertToViewportPoint(r.x,     r.y);
-            const [vx2, vy2] = cssViewport.convertToViewportPoint(r.x + w, r.y + h);
-
-            const leftCss   = Math.min(vx1, vx2);
-            const topCss    = Math.min(vy1, vy2);
-            const widthCss  = Math.abs(vx2 - vx1);
-            const heightCss = Math.abs(vy2 - vy1);
-
-            const leftDev   = Math.round(leftCss   * dpr);
-            const topDev    = Math.round(topCss    * dpr);
-            const widthDev  = Math.max(1, Math.round(widthCss  * dpr));
-            const heightDev = Math.max(1, Math.round(heightCss * dpr));
-
-            ctx.fillStyle = r.color || 'yellow';
-            ctx.fillRect(leftDev, topDev, widthDev, heightDev);
-          }
-        });
-      }
-
-      // ---- Windowing: only keep ±ACTIVE_RADIUS pages alive ----
-      function nearestVisiblePage() {
-        const containerRect = viewerContainer.getBoundingClientRect();
-        let best = 1, bestDist = Infinity;
-        for (const el of pageDivs) {
-          const r = el.getBoundingClientRect();
-          const d = Math.abs(r.top - containerRect.top);
-          if (d < bestDist) { bestDist = d; best = Number(el.dataset.pageNumber); }
-        }
+        if (best != null) pending.delete(best);
         return best;
       }
 
-      function clearCanvases(wrapper) {
-        const rc = wrapper.querySelector('.renderCanvas');
-        const hc = wrapper.querySelector('.hlCanvas');
-        if (rc) { rc.width = 1; rc.height = 1; }
-        if (hc) { hc.width = 1; hc.height = 1; }
+      async function pump() {
+        while (inFlight < CONCURRENCY) {
+          const p = pickNextPage();
+          if (!p) return;
+          inFlight++;
+
+          try {
+            const page = await pdf.getPage(p);
+            const cssViewport = page.getViewport({ scale: CSS_SCALE });
+            const devViewport = page.getViewport({ scale: CSS_SCALE * CURRENT_DPR });
+
+            // Create wrapper and size canvases
+            const wrapper = ensureWrapper(p, cssViewport, devViewport);
+            const renderCanvas = wrapper.querySelector('.renderCanvas');
+            const hlCanvas = wrapper.querySelector('.hlCanvas');
+
+            renderCanvas.width  = Math.floor(devViewport.width);
+            renderCanvas.height = Math.floor(devViewport.height);
+            renderCanvas.style.width  = Math.floor(cssViewport.width) + 'px';
+            renderCanvas.style.height = Math.floor(cssViewport.height) + 'px';
+
+            hlCanvas.width  = renderCanvas.width;
+            hlCanvas.height = renderCanvas.height;
+            hlCanvas.style.width  = renderCanvas.style.width;
+            hlCanvas.style.height = renderCanvas.style.height;
+
+            wrapper.style.width  = renderCanvas.style.width;
+            wrapper.style.height = renderCanvas.style.height;
+
+            // Update placeholder dimensions once we know the real size
+            if (!firstViewportMeasured) {
+              firstViewportMeasured = true;
+              estimatedCss = { width: Math.floor(cssViewport.width), height: Math.floor(cssViewport.height) };
+              for (let i = 1; i <= total; i++) {
+                if (!slots[i - 1].wrapper) {
+                  slots[i - 1].slot.style.width  = estimatedCss.width + 'px';
+                  slots[i - 1].slot.style.height = (estimatedCss.height + 22) + 'px';
+                }
+              }
+            }
+
+            const ctx = renderCanvas.getContext('2d', { alpha: false });
+            const task = page.render({ canvasContext: ctx, viewport: devViewport });
+            renderTasks.set(p, { task, page });
+
+            await task.promise; // throws if canceled
+            renderTasks.delete(p);
+
+            if (Math.abs(p - centerPage) <= ACTIVE_RADIUS) {
+              const rects = (highlightsByPage[String(p)] || highlightsByPage[p] || []);
+              drawHighlights(hlCanvas, rects, cssViewport);
+              rendered.add(p);
+            } else {
+              page.cleanup();
+              destroyWrapper(p);
+            }
+          } catch (err) {
+            if (!(err && (err.name === 'RenderingCancelled' || String(err).includes('Rendering cancelled')))) {
+              console.warn('Render error on page', p, err);
+            }
+          } finally {
+            inFlight--;
+          }
+        }
       }
 
       function updateActiveWindow() {
-        const center = nearestVisiblePage();
-        const minP = Math.max(1, center - ACTIVE_RADIUS);
-        const maxP = Math.min(total, center + ACTIVE_RADIUS);
+        centerPage = nearestVisiblePage();
+        const minP = Math.max(1, centerPage - ACTIVE_RADIUS);
+        const maxP = Math.min(total, centerPage + ACTIVE_RADIUS);
 
         const keep = new Set();
         for (let p = minP; p <= maxP; p++) {
@@ -274,39 +296,94 @@
         }
 
         // Cancel far-off render tasks and free memory
-        for (const [p, { task, page }] of renderTasks) {
+        for (const [p, obj] of Array.from(renderTasks.entries())) {
           if (!keep.has(p)) {
-            try { task.cancel(); } catch {}
+            try { obj.task.cancel(); } catch {}
             renderTasks.delete(p);
-            page?.cleanup();
+            obj.page?.cleanup();
           }
         }
+
         for (let p = 1; p <= total; p++) {
           if (!keep.has(p) && rendered.has(p)) {
-            clearCanvases(pageDivs[p - 1]);
+            destroyWrapper(p);
             rendered.delete(p);
           }
         }
+
+        // Keep the pump going in case new items were queued
+        pump();
       }
 
-      // Throttle scroll handling
       let scrollRAF = 0;
-      viewerContainer.addEventListener('scroll', () => {
+      function scheduleWindowUpdate() {
         if (scrollRAF) cancelAnimationFrame(scrollRAF);
         scrollRAF = requestAnimationFrame(() => {
           updateActiveWindow();
           scrollRAF = 0;
         });
-      });
+      }
 
-      // Bootstrap: scroll to requested page, then compute window
-      pageDivs[Math.min(total, Math.max(1, startAt)) - 1]
-        .scrollIntoView({ block: 'start' });
+      viewerContainer.addEventListener('scroll', scheduleWindowUpdate, { passive: true });
+
+      // ---- Highlight drawing (batched by color; rotation-safe) ----
+      function drawHighlights(hlCanvas, rects, cssViewport) {
+        const ctx = hlCanvas.getContext('2d', { alpha: true });
+        ctx.clearRect(0, 0, hlCanvas.width, hlCanvas.height);
+        ctx.globalAlpha = 0.3;
+        // ctx.globalCompositeOperation = 'multiply'; // enable if specific blending is needed
+
+        const dpr = CURRENT_DPR;
+        requestAnimationFrame(() => {
+          // group by color
+          const groups = new Map();
+          for (const r of rects) {
+            const color = r.color || 'yellow';
+            if (!groups.has(color)) groups.set(color, []);
+            groups.get(color).push(r);
+          }
+          for (const [color, arr] of groups) {
+            ctx.fillStyle = color;
+            for (const r of arr) {
+              const w = r.w ?? r.width, h = r.h ?? r.height;
+              const [vx1, vy1] = cssViewport.convertToViewportPoint(r.x,     r.y);
+              const [vx2, vy2] = cssViewport.convertToViewportPoint(r.x + w, r.y + h);
+              const leftDev   = Math.round(Math.min(vx1, vx2) * dpr);
+              const topDev    = Math.round(Math.min(vy1, vy2) * dpr);
+              const widthDev  = Math.max(1, Math.round(Math.abs(vx2 - vx1) * dpr));
+              const heightDev = Math.max(1, Math.round(Math.abs(vy2 - vy1) * dpr));
+              ctx.fillRect(leftDev, topDev, widthDev, heightDev);
+            }
+          }
+        });
+      }
+
+      // ---- Bootstrap: jump to requested page and compute initial window ----
+      const startIndex = Math.min(total, Math.max(1, startAt)) - 1;
+      slots[startIndex].slot.scrollIntoView({ block: 'start' });
       updateActiveWindow();
 
-      // Re-window on resize (DPR may change on zoom; keeping it simple)
+      // ---- Handle resize / DPR changes: re-render only the active window ----
       window.addEventListener('resize', () => {
-        updateActiveWindow();
+        const newDpr = getDPR();
+        if (Math.abs(newDpr - CURRENT_DPR) > 0.001) {
+          CURRENT_DPR = newDpr;
+        }
+        const center = nearestVisiblePage();
+        const minP = Math.max(1, center - ACTIVE_RADIUS);
+        const maxP = Math.min(total, center + ACTIVE_RADIUS);
+        for (let p = minP; p <= maxP; p++) {
+          if (rendered.has(p)) {
+            destroyWrapper(p);
+            rendered.delete(p);
+            queueRender(p);
+          }
+        }
+      });
+
+      // ---- Clean up on unload ----
+      window.addEventListener('beforeunload', () => {
+        try { loadingTask?.destroy(); } catch {}
       });
     })();
   </script>
