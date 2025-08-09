@@ -140,6 +140,7 @@ namespace SmartDocumentReview.Services
                         PageY        = (float)y1,
                         Width        = (float)(x2 - x1)
                         // If you add Height: Height = (float)(y2 - y1)
+                            Height = (float)(y2 - y1) // NEW
                     });
                 }
             }
