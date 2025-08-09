@@ -1,3 +1,4 @@
+// File: Services/PdfKeywordTagger.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,7 +9,7 @@ using System.IO;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using SmartDocumentReview.Models;
-using SmartDocumentReview.Shared; // <-- unified regex helpers
+using SmartDocumentReview.Shared; // unified regex helpers
 
 namespace SmartDocumentReview.Services
 {
@@ -140,16 +141,16 @@ namespace SmartDocumentReview.Services
 
                     matches.Add(new TagMatch
                     {
-                        Keyword     = h.kw.Text,
-                        SectionTitle= sectionTitle,
-                        MatchedText = context,
-                        CreatedBy   = createdBy,
-                        CreatedAt   = DateTime.UtcNow,
-                        PageNumber  = i,
-                        PageX       = (float)x1,
-                        PageY       = (float)y1,
-                        Width       = (float)(x2 - x1) // keeping your original shape fields
-                        // If your TagMatch supports Height, consider setting it to (float)(y2 - y1)
+                        Keyword      = h.kw.Text,
+                        SectionTitle = sectionTitle,
+                        MatchedText  = context,
+                        CreatedBy    = createdBy,
+                        CreatedAt    = DateTime.UtcNow,
+                        PageNumber   = i,
+                        PageX        = (float)x1,
+                        PageY        = (float)y1,
+                        Width        = (float)(x2 - x1)
+                        // If TagMatch has Height: Height = (float)(y2 - y1)
                     });
                 }
             }
