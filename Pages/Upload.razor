@@ -221,7 +221,8 @@
     async Task LoadPdfAsync(int page)
     {
         var file = "/uploads/latest.pdf";
-        var highlightParams = string.Join("&", keywordColors.Select(kvp => $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EcapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
+        var highlightParams = string.Join("&", keywordColors.Select(kvp =>
+            $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
         var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
         await JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
@@ -231,26 +232,26 @@
         if (string.IsNullOrWhiteSpace(text))
             return (MarkupString)HtmlEncoder.Default.Encode(text ?? string.Empty);
 
-        // Collect keywords from the current color map to preserve color->keyword binding
+        // Use the same keywords/colors currently shown in the UI
         var allKeywords = keywordColors.Keys.ToList();
         var wholeKw = allKeywords.Where(k => !k.AllowPartial).ToList();
         var partKw  = allKeywords.Where(k =>  k.AllowPartial).ToList();
 
         var ranges = new List<(int start, int end, string color)>(32);
 
-        // Helper to collect matches using named groups (?<k{i}>...) so we know which keyword matched
-        static void Collect(Regex rx, string sourceText, List<Keyword> sourceKeywords, Dictionary<Keyword,string> colors, List<(int,int,string)> sink)
+        // Collect matches using named groups (?<k{i}>) to map back to the right keyword/color
+        static void Collect(Regex rx, string sourceText, List<Keyword> srcKeywords, Dictionary<Keyword,string> colors, List<(int,int,string)> sink)
         {
             foreach (Match m in rx.Matches(sourceText))
             {
-                for (int i = 0; i < sourceKeywords.Count; i++)
+                for (int i = 0; i < srcKeywords.Count; i++)
                 {
                     var g = m.Groups[$"k{i}"];
                     if (g.Success)
                     {
-                        var kw = sourceKeywords[i];
+                        var kw = srcKeywords[i];
                         sink.Add((g.Index, g.Index + g.Length, colors[kw]));
-                        break; // only one group will be set
+                        break; // exactly one group will be set
                     }
                 }
             }
@@ -270,12 +271,13 @@
         if (ranges.Count == 0)
             return (MarkupString)HtmlEncoder.Default.Encode(text);
 
-        // Sort by start, then prefer longer matches; dedupe exact spans; skip true overlaps
+        // Deterministic ordering: start asc, then longer first
         var ordered = ranges
             .OrderBy(r => r.start)
             .ThenByDescending(r => r.end - r.start)
             .ToList();
 
+        // Dedupe exact spans; skip true overlaps (keep earlier/longer)
         var sb = new StringBuilder(text.Length + ordered.Count * 40);
         var seen = new HashSet<(int s, int e)>();
         int cursor = 0;
@@ -283,14 +285,15 @@
 
         foreach (var r in ordered)
         {
-            if (!seen.Add((r.start, r.end))) continue; // exact duplicate span
-            if (r.start < lastEnd) continue;           // overlapping with a longer/earlier span we already kept
+            if (!seen.Add((r.start, r.end))) continue;
+            if (r.start < lastEnd) continue;
 
             if (cursor < r.start)
                 sb.Append(HtmlEncoder.Default.Encode(text.AsSpan(cursor, r.start - cursor)));
 
             var encodedMatch = HtmlEncoder.Default.Encode(text.AsSpan(r.start, r.end - r.start));
             sb.Append($"<mark style='background-color:{r.color}'>{encodedMatch}</mark>");
+
             cursor = r.end;
             lastEnd = r.end;
         }
