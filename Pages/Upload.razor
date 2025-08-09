@@ -8,6 +8,7 @@
 @using System.Text.RegularExpressions
 @using System.Linq
 @using System.Text.Encodings.Web
+@using System.Text.Json
 @using SmartDocumentReview.Shared
 @inject AuthService AuthService
 @inject PdfKeywordTagger Tagger
@@ -166,6 +167,7 @@
                 await memoryStream.CopyToAsync(fs);
             }
 
+            // Persist document meta
             var document = new Document
             {
                 FileName = uploadedFile.Name,
@@ -183,6 +185,25 @@
 
             Db.TagMatches.AddRange(MatchedKeywords);
             await Db.SaveChangesAsync();
+
+            // ---- NEW: write overlay JSON for PDF.js to draw exact rectangles ----
+            var perPage = MatchedKeywords
+                .GroupBy(m => m.PageNumber)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(m => new {
+                        x = m.PageX, y = m.PageY,
+                        w = m.Width, h = m.Height,
+                        color = keywordColors
+                            .First(k => k.Key.Text.Equals(m.Keyword, StringComparison.OrdinalIgnoreCase))
+                            .Value
+                    }).ToList()
+                );
+
+            var overlaysPath = Path.Combine(uploadsDir, "latest-highlights.json");
+            var json = JsonSerializer.Serialize(perPage);
+            await File.WriteAllTextAsync(overlaysPath, json);
+            // --------------------------------------------------------------------
 
             if (MatchedKeywords.Count > 0)
             {
@@ -214,9 +235,8 @@
     async Task LoadPdfAsync(int page)
     {
         var file = "/uploads/latest.pdf";
-        var highlightParams = string.Join("&", keywordColors.Select(kvp =>
-            $"highlight={Uri.EscapeDataString(kvp.Key.Text)}&color={Uri.EscapeDataString(kvp.Value)}&partial={kvp.Key.AllowPartial.ToString().ToLower()}"));
-        var viewerUrl = $"/pdfjs/index.html?file={file}&page={page}&{highlightParams}";
+        var overlay = "/uploads/latest-highlights.json";
+        var viewerUrl = $"/pdfjs/index.html?file={Uri.EscapeDataString(file)}&page={page}&overlay={Uri.EscapeDataString(overlay)}";
         await JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
     }
 
@@ -242,7 +262,7 @@
                     {
                         var kw = srcKeywords[i];
                         sink.Add((g.Index, g.Index + g.Length, colors[kw]));
-                        break;
+                        break; // exactly one group will be set
                     }
                 }
             }
