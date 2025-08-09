@@ -107,12 +107,43 @@
       }
 
       // ---- Open PDF with streaming + larger range chunks ----
+      const PDFJS_VER = '2.14.305';
+      const CDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VER}/`;
+
+      // Robust worker setup: if CDN worker is blocked by CSP/CORS, build a same-origin Blob worker.
+      async function ensureWorker() {
+        try {
+          // quick HEAD to see if worker is reachable
+          const res = await fetch(CDN + 'pdf.worker.min.js', { method: 'HEAD' });
+          if (!res.ok) throw new Error('worker not reachable');
+          pdfjsLib.GlobalWorkerOptions.workerSrc = CDN + 'pdf.worker.min.js';
+        } catch (e) {
+          console.warn('[worker] cdn worker blocked, falling back to blob worker', e);
+          try {
+            const js = await (await fetch(CDN + 'pdf.worker.min.js')).text();
+            const blob = new Blob([js], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            pdfjsLib.GlobalWorkerOptions.workerSrc = url;
+          } catch (e2) {
+            console.warn('[worker] blob worker failed, disabling worker (slow)', e2);
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+            pdfjsLib.disableWorker = true;
+          }
+        }
+      }
+      await ensureWorker();
+
       const loadingTask = pdfjsLib.getDocument({
         url: file,
         rangeChunkSize: 1 << 20,   // 1 MiB
         disableAutoFetch: true,
         disableStream: false,
-        withCredentials: false
+        withCredentials: false,
+        // Many deployments block eval via CSP; enable safe font parsing path
+        isEvalSupported: false,
+        cMapUrl: CDN + 'cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: CDN + 'standard_fonts/'
       });
 
       // 1) Render ONLY the requested page ASAP (no DOM for others yet).
