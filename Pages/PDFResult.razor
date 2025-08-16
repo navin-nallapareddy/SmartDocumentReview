@@ -1,7 +1,6 @@
 @page "/results"
 @inject NavigationManager Navigation
 @inject SmartDocumentReview.Services.ResultStateService ResultStateService
-@inject IJSRuntime JS
 @using System.Linq
 @using System.Text
 @using System.Text.RegularExpressions
@@ -17,7 +16,7 @@
         @foreach (var pageGroup in ResultStateService.Matches.GroupBy(m => m.PageNumber))
         {
             <div style="margin-bottom: 1.5rem;">
-                <h4 @onclick="() => LoadPdfAsync(pageGroup.Key)"
+                <h4 @onclick="async () => await LoadPdfAsync(pageGroup.Key)"
                     style="cursor: pointer; color: blue; text-decoration: underline;">
                     Page @pageGroup.Key
                 </h4>
@@ -34,7 +33,7 @@
 
     <!-- Right: PDF Viewer -->
     <div style="width: 60%; height: 100%;">
-        <iframe id="pdfViewer" width="100%" height="100%" frameborder="0"></iframe>
+        <iframe id="pdfViewer" src="@viewerSrc" width="100%" height="100%" frameborder="0"></iframe>
     </div>
 </div>
 
@@ -42,6 +41,7 @@
     private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
     private Dictionary<Keyword, string> keywordColors = new();
     private int? _pendingPage;
+    private string? viewerSrc;
 
     protected override void OnInitialized()
     {
@@ -68,8 +68,7 @@
     {
         var file = "/uploads/latest.pdf";
         var overlay = "/uploads/latest-highlights.json"; // Use same overlay as Upload.razor
-        var viewerUrl = $"/pdfjs/index.html?file={Uri.EscapeDataString(file)}&page={page}&overlay={Uri.EscapeDataString(overlay)}";
-        await JS.InvokeVoidAsync("setIframeSrc", "pdfViewer", viewerUrl);
+        viewerSrc = $"/pdfjs/index.html?file={Uri.EscapeDataString(file)}&page={page}&overlay={Uri.EscapeDataString(overlay)}";
     }
 
     MarkupString HighlightKeywords(string text)
