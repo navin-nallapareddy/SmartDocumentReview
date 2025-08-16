@@ -1,6 +1,1 @@
-function setIframeSrc(id, src) {
-    const iframe = document.getElementById(id);
-    if (iframe) {
-        iframe.src = src;
-    }
-}
+// Custom JavaScript is no longer required; file kept intentionally blank.
