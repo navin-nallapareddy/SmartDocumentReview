@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>PDF Viewer (virtualized + fast highlights)</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf_viewer.min.css" />
+  <link rel="stylesheet" href="lib/pdf_viewer.min.css" />
   <style>
     html, body { margin: 0; height: 100%; }
     #viewerContainer {
@@ -64,7 +64,7 @@
   </div>
 
   <!-- PDF.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  <script src="lib/pdf.min.js"></script>
   <script>
     (async function () {
       const params   = new URLSearchParams(location.search);
@@ -88,8 +88,8 @@
       const _cIC = window.cancelIdleCallback || function (id) { clearTimeout(id); };
       const idleTick = (timeout = 50) => new Promise((resolve) => _rIC(resolve, { timeout }));
 
-      // Verify worker actually loads (fallback = very slow)
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+      // Configure local worker (no CDN)
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
       mark('worker configured');
 
       const viewer          = document.getElementById('viewer');
@@ -114,32 +114,6 @@
       }
 
       // ---- Open PDF with streaming + larger range chunks ----
-      const PDFJS_VER = '2.14.305';
-      const CDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VER}/`;
-
-      // Robust worker setup: if CDN worker is blocked by CSP/CORS, build a same-origin Blob worker.
-      async function ensureWorker() {
-        try {
-          // quick HEAD to see if worker is reachable
-          const res = await fetch(CDN + 'pdf.worker.min.js', { method: 'HEAD' });
-          if (!res.ok) throw new Error('worker not reachable');
-          pdfjsLib.GlobalWorkerOptions.workerSrc = CDN + 'pdf.worker.min.js';
-        } catch (e) {
-          console.warn('[worker] cdn worker blocked, falling back to blob worker', e);
-          try {
-            const js = await (await fetch(CDN + 'pdf.worker.min.js')).text();
-            const blob = new Blob([js], { type: 'application/javascript' });
-            const url = URL.createObjectURL(blob);
-            pdfjsLib.GlobalWorkerOptions.workerSrc = url;
-          } catch (e2) {
-            console.warn('[worker] blob worker failed, disabling worker (slow)', e2);
-            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-            pdfjsLib.disableWorker = true;
-          }
-        }
-      }
-      await ensureWorker();
-
       const loadingTask = pdfjsLib.getDocument({
         url: file,
         rangeChunkSize: 1 << 20,   // 1 MiB
@@ -147,10 +121,7 @@
         disableStream: false,
         withCredentials: false,
         // Many deployments block eval via CSP; enable safe font parsing path
-        isEvalSupported: false,
-        cMapUrl: CDN + 'cmaps/',
-        cMapPacked: true,
-        standardFontDataUrl: CDN + 'standard_fonts/'
+        isEvalSupported: false
       });
 
       // 1) Render ONLY the requested page ASAP (no DOM for others yet).
