@@ -22,15 +22,18 @@ namespace SmartDocumentReview.Services
             pdfStream.CopyTo(memory);
             var bytes = memory.ToArray();
             var tempPdf = Path.GetTempFileName();
-            File.WriteAllBytes(tempPdf, bytes);
-            memory.Position = 0;
 
-            using var pdf = PdfDocument.Open(memory);
-
-            for (int i = 1; i <= pdf.NumberOfPages; i++)
+            try
             {
-                var page = pdf.GetPage(i);
-                var letters = page.Letters;
+                File.WriteAllBytes(tempPdf, bytes);
+                memory.Position = 0;
+
+                using var pdf = PdfDocument.Open(memory);
+
+                for (int i = 1; i <= pdf.NumberOfPages; i++)
+                {
+                    var page = pdf.GetPage(i);
+                    var letters = page.Letters;
 
                 var pageTextBuilder = new StringBuilder();
                 var spans = new List<(int start, int end, Letter letter)>();
@@ -101,8 +104,24 @@ namespace SmartDocumentReview.Services
                     }
                 }
             }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"PDF processing failed: {ex}");
+                throw;
+            }
+            finally
+            {
+                try
+                {
+                    File.Delete(tempPdf);
+                }
+                catch
+                {
+                    // ignore cleanup errors
+                }
+            }
 
-            File.Delete(tempPdf);
             return matches;
         }
 

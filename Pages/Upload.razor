@@ -7,7 +7,7 @@
 
 <h3>Upload a PDF</h3>
 
-<EditForm OnValidSubmit="HandleSubmit">
+<EditForm Model="@this" OnValidSubmit="HandleSubmit">
     <div class="mb-3">
         <InputFile OnChange="OnInputFileChange" accept=".pdf,application/pdf" />
         @if (!string.IsNullOrWhiteSpace(Error))
@@ -42,6 +42,8 @@
 }
 
 @code {
+    const long MaxFileSize = 20 * 1024 * 1024; // 20 MB limit
+
     IBrowserFile? UploadedFile;
     bool IsBusy;
     string? SavedFileName;
@@ -67,6 +69,13 @@
         {
             Error = "Only PDF files are supported.";
             UploadedFile = null;
+            return;
+        }
+
+        if (UploadedFile.Size > MaxFileSize)
+        {
+            Error = $"File must be {MaxFileSize / (1024 * 1024)} MB or smaller.";
+            UploadedFile = null;
         }
     }
 
@@ -75,6 +84,12 @@
         if (UploadedFile is null)
         {
             Error = "Please choose a PDF file.";
+            return;
+        }
+
+        if (UploadedFile.Size > MaxFileSize)
+        {
+            Error = $"File must be {MaxFileSize / (1024 * 1024)} MB or smaller.";
             return;
         }
 
@@ -97,7 +112,7 @@
             // Save the PDF
             await using (var fs = File.Create(fullPath))
             {
-                await UploadedFile.OpenReadStream(long.MaxValue).CopyToAsync(fs);
+                await UploadedFile.OpenReadStream(maxAllowedSize: MaxFileSize).CopyToAsync(fs);
             }
 
             SavedFileName = finalName;
