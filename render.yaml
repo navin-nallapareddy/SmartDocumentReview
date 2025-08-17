@@ -3,8 +3,8 @@ services:
     name: smart-document-review
     env: dotnet
     plan: free
-    buildCommand: dotnet build
-    startCommand: dotnet SmartDocumentReview.dll
+    buildCommand: dotnet publish -c Release -o out
+    startCommand: dotnet out/SmartDocumentReview.dll
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
