@@ -88,8 +88,32 @@
       const _cIC = window.cancelIdleCallback || function (id) { clearTimeout(id); };
       const idleTick = (timeout = 50) => new Promise((resolve) => _rIC(resolve, { timeout }));
 
-      // Configure local worker (no CDN)
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+      // Configure worker with local file first, fallback to CDN if missing
+      const workerCandidates = [
+        'lib/pdf.worker.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.worker.min.js'
+      ];
+      let workerSrc = null;
+      for (const src of workerCandidates) {
+        try {
+          const res = await fetch(src, { method: 'HEAD', cache: 'no-store' });
+          if (res.ok) {
+            workerSrc = src;
+            if (src !== workerCandidates[0]) {
+              console.warn('Falling back to PDF.js worker from CDN:', src);
+            }
+            break;
+          }
+        } catch (e) {
+          // try next candidate
+        }
+      }
+      if (!workerSrc) {
+        const msg = 'Could not load a PDF.js worker from any known path.';
+        document.body.innerHTML = `<pre style="color:red">${msg}</pre>`;
+        throw new Error(msg);
+      }
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
       mark('worker configured');
 
       const viewer          = document.getElementById('viewer');
