@@ -10,13 +10,37 @@
  */
 
 /* global pdfjsLib */
-(function () {
+(async function () {
   if (!window.pdfjsLib) {
     console.warn("pdfjsLib not found. Did you include /pdfjs/build/pdf.js ?");
     return;
   }
-  // Point the worker to your local pdf.worker build
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdfjs/build/pdf.worker.min.js";
+  // Try known worker locations (local first, then CDN)
+  const workerCandidates = [
+    "/pdfjs/build/pdf.worker.min.js",
+    "/pdfjs/lib/pdf.worker.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.worker.min.js",
+  ];
+  let workerSrc = null;
+  for (const src of workerCandidates) {
+    try {
+      const res = await fetch(src, { method: "HEAD", cache: "no-store" });
+      if (res.ok) {
+        workerSrc = src;
+        if (src !== workerCandidates[0]) {
+          console.warn("Falling back to PDF.js worker at", src);
+        }
+        break;
+      }
+    } catch (e) {
+      // ignore and try next
+    }
+  }
+  if (!workerSrc) {
+    console.error("Could not locate a pdf.worker.min.js file. PDF rendering will fail.");
+    return;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
 
   // Optional: small helper to render into a <canvas id="pdfCanvas">
   window.renderPdfToCanvas = async function (url, canvasId) {
