@@ -12,8 +12,11 @@
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
 
+  <!-- REMOVE the explicit wwwroot Content Include to avoid NETSDK1022 -->
+  <!--
   <ItemGroup>
     <Content Include="wwwroot\**\*.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  -->
 
 </Project>
