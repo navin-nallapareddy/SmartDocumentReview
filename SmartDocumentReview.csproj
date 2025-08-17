@@ -19,4 +19,12 @@
   </ItemGroup>
   -->
 
+<ItemGroup>
+  <!-- Exclude the in-repo tests folder from the web app build/publish -->
+  <Compile Remove="SmartDocumentReview.Tests\**\*.cs" />
+  <Content Remove="SmartDocumentReview.Tests\**\*" />
+  <None   Remove="SmartDocumentReview.Tests\**\*" />
+</ItemGroup>
+
+
 </Project>
