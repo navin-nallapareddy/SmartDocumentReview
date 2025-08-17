@@ -1,95 +1,32 @@
-// File: Pages/PDFResult.razor.cs
-using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Components;
-using SmartDocumentReview.Shared;  // KeywordRegex
-using SmartDocumentReview.Models;  // Keyword
+/* SmartDocumentReview/Pages/PDFResult.razor.css
+   Keep styles simple so nothing overlays or dims the iframe.
+*/
 
-namespace SmartDocumentReview.Pages
-{
-    public partial class PDFResult
-    {
-        private sealed record Hit(int Start, int End, Keyword Keyword)
-        {
-            public int Length => End - Start;
-        }
+:root {
+  /* you can tweak these if desired */
+  --pdf-frame-height: 80vh;
+}
 
-        protected MarkupString HighlightKeywords(string text, IEnumerable<Keyword> keywords, IDictionary<Keyword, string> colorMap)
-            => BuildHighlights(text, keywords, k => colorMap[k]);
+/* Ensure the iframe fills the width and isn't visually “greyed out” by styles */
+iframe[title="PDF Viewer"] {
+  display: block;
+  width: 100%;
+  height: var(--pdf-frame-height);
+  border: none;
+  opacity: 1;            /* guard against accidental opacity */
+  pointer-events: auto;  /* allow interactions inside the viewer */
+  z-index: 1;            /* keep it above page background, below any modal */
+}
 
-        protected MarkupString BuildHighlights(string text, IEnumerable<Keyword> keywords, Func<Keyword, string> colorForKeyword)
-        {
-            if (string.IsNullOrEmpty(text) || keywords is null)
-                return new MarkupString(HtmlEncoder.Default.Encode(text ?? string.Empty));
+/* Defensive: if any parent sets a dimming effect, neutralize it here */
+.pdf-container,
+.page-content {
+  opacity: 1 !important;
+  filter: none !important;
+}
 
-            var kwList = keywords.ToList();
-            var wholeKw = kwList.Where(k => !k.AllowPartial).ToList();
-            var partKw  = kwList.Where(k =>  k.AllowPartial).ToList();
-
-            var matches = new List<Hit>(32);
-
-            if (wholeKw.Count > 0)
-            {
-                var rxWhole = KeywordRegex.BuildWholeWordRegex(wholeKw.Select(k => k.Text));
-                Collect(rxWhole, text, wholeKw, matches);
-            }
-            if (partKw.Count > 0)
-            {
-                var rxPart = KeywordRegex.BuildPartialRegex(partKw.Select(k => k.Text));
-                Collect(rxPart, text, partKw, matches);
-            }
-
-            var ordered = matches
-                .OrderBy(m => m.Start)
-                .ThenByDescending(m => m.Length)
-                .ToList();
-
-            var canonical = new List<Hit>(ordered.Count);
-            var seen = new HashSet<(int s, int e)>();
-            int lastEnd = -1;
-
-            foreach (var m in ordered)
-            {
-                if (!seen.Add((m.Start, m.End))) continue;
-                if (m.Start < lastEnd) continue;
-                canonical.Add(m);
-                lastEnd = m.End;
-            }
-
-            var sb = new StringBuilder(text.Length + canonical.Count * 40);
-            int cursor = 0;
-
-            foreach (var m in canonical)
-            {
-                if (cursor < m.Start)
-                    sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor, m.Start - cursor)));
-
-                var encoded = HtmlEncoder.Default.Encode(text.Substring(m.Start, m.Length));
-                sb.Append($"<mark style=\"background-color:{colorForKeyword(m.Keyword)}\">{encoded}</mark>");
-                cursor = m.End;
-            }
-
-            if (cursor < text.Length)
-                sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor)));
-
-            return new MarkupString(sb.ToString());
-        }
-
-        private static void Collect(Regex rx, string text, List<Keyword> sourceKeywords, List<Hit> sink)
-        {
-            foreach (Match m in rx.Matches(text))
-            {
-                for (int i = 0; i < sourceKeywords.Count; i++)
-                {
-                    var g = m.Groups[$"k{i}"];
-                    if (g.Success)
-                    {
-                        sink.Add(new Hit(g.Index, g.Index + g.Length, sourceKeywords[i]));
-                        break;
-                    }
-                }
-            }
-        }
-    }
+/* If you wrap the iframe with a container, ensure it doesn't collapse */
+.pdf-wrapper {
+  position: relative;
+  min-height: var(--pdf-frame-height);
 }
