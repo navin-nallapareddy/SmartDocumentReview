@@ -1,32 +1,38 @@
-/* SmartDocumentReview/Pages/PDFResult.razor.css
-   Keep styles simple so nothing overlays or dims the iframe.
-*/
+// SmartDocumentReview/Pages/PDFResult.razor.cs
+using System;
+using Microsoft.AspNetCore.Components;
 
-:root {
-  /* you can tweak these if desired */
-  --pdf-frame-height: 80vh;
-}
+namespace SmartDocumentReview.Pages
+{
+    public partial class PDFResult : ComponentBase
+    {
+        [Parameter] public string? FileName { get; set; }
 
-/* Ensure the iframe fills the width and isn't visually “greyed out” by styles */
-iframe[title="PDF Viewer"] {
-  display: block;
-  width: 100%;
-  height: var(--pdf-frame-height);
-  border: none;
-  opacity: 1;            /* guard against accidental opacity */
-  pointer-events: auto;  /* allow interactions inside the viewer */
-  z-index: 1;            /* keep it above page background, below any modal */
-}
+        [Inject] public NavigationManager Nav { get; set; } = default!;
 
-/* Defensive: if any parent sets a dimming effect, neutralize it here */
-.pdf-container,
-.page-content {
-  opacity: 1 !important;
-  filter: none !important;
-}
+        public string ViewerUrl { get; private set; } = string.Empty;
 
-/* If you wrap the iframe with a container, ensure it doesn't collapse */
-.pdf-wrapper {
-  position: relative;
-  min-height: var(--pdf-frame-height);
+        protected override void OnParametersSet()
+        {
+            if (string.IsNullOrWhiteSpace(FileName))
+            {
+                ViewerUrl = string.Empty;
+                return;
+            }
+
+            // Respect path base (e.g., ASPNETCORE_PATHBASE=/app)
+            var basePath = new Uri(Nav.BaseUri).AbsolutePath.TrimEnd('/'); // "" or "/app"
+            string PathBaseAware(string relative) =>
+                string.IsNullOrEmpty(basePath) || basePath == "/"
+                    ? relative
+                    : $"{basePath}{relative}";
+
+            // Build a same-origin, URL-encoded file path for the viewer
+            var encodedFileName = Uri.EscapeDataString(FileName);
+            var pdfUrl = PathBaseAware($"/uploads/{encodedFileName}");
+            var encodedPdfUrl = Uri.EscapeDataString(pdfUrl);
+
+            ViewerUrl = PathBaseAware($"/pdfjs/web/viewer.html?file={encodedPdfUrl}");
+        }
+    }
 }
