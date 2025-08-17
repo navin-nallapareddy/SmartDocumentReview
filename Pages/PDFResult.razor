@@ -69,6 +69,7 @@
         var file = "/uploads/latest.pdf";
         var overlay = "/uploads/latest-highlights.json"; // Use same overlay as Upload.razor
         viewerSrc = $"/pdfjs/index.html?file={Uri.EscapeDataString(file)}&page={page}&overlay={Uri.EscapeDataString(overlay)}";
+        await InvokeAsync(StateHasChanged);
     }
 
     MarkupString HighlightKeywords(string text)
