@@ -1,0 +1,15 @@
+@page "/"
+@inject NavigationManager Nav
+
+@* Redirect the root to the upload flow *@
+<h3 class="visually-hidden">Redirecting…</h3>
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            Nav.NavigateTo("/upload", forceLoad: false);
+        }
+    }
+}
