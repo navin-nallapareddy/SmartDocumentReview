@@ -1,38 +1,95 @@
-// SmartDocumentReview/Pages/PDFResult.razor.cs
-using System;
+// File: Pages/PDFResult.razor.cs
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
+using SmartDocumentReview.Shared;  // KeywordRegex
+using SmartDocumentReview.Models;  // Keyword
 
 namespace SmartDocumentReview.Pages
 {
-    public partial class PDFResult : ComponentBase
+    public partial class PDFResult
     {
-        [Parameter] public string? FileName { get; set; }
-
-        [Inject] public NavigationManager Nav { get; set; } = default!;
-
-        public string ViewerUrl { get; private set; } = string.Empty;
-
-        protected override void OnParametersSet()
+        private sealed record Hit(int Start, int End, Keyword Keyword)
         {
-            if (string.IsNullOrWhiteSpace(FileName))
+            public int Length => End - Start;
+        }
+
+        protected MarkupString HighlightKeywords(string text, IEnumerable<Keyword> keywords, IDictionary<Keyword, string> colorMap)
+            => BuildHighlights(text, keywords, k => colorMap[k]);
+
+        protected MarkupString BuildHighlights(string text, IEnumerable<Keyword> keywords, Func<Keyword, string> colorForKeyword)
+        {
+            if (string.IsNullOrEmpty(text) || keywords is null)
+                return new MarkupString(HtmlEncoder.Default.Encode(text ?? string.Empty));
+
+            var kwList = keywords.ToList();
+            var wholeKw = kwList.Where(k => !k.AllowPartial).ToList();
+            var partKw  = kwList.Where(k =>  k.AllowPartial).ToList();
+
+            var matches = new List<Hit>(32);
+
+            if (wholeKw.Count > 0)
             {
-                ViewerUrl = string.Empty;
-                return;
+                var rxWhole = KeywordRegex.BuildWholeWordRegex(wholeKw.Select(k => k.Text));
+                Collect(rxWhole, text, wholeKw, matches);
+            }
+            if (partKw.Count > 0)
+            {
+                var rxPart = KeywordRegex.BuildPartialRegex(partKw.Select(k => k.Text));
+                Collect(rxPart, text, partKw, matches);
             }
 
-            // Respect path base (e.g., ASPNETCORE_PATHBASE=/app)
-            var basePath = new Uri(Nav.BaseUri).AbsolutePath.TrimEnd('/'); // "" or "/app"
-            string PathBaseAware(string relative) =>
-                string.IsNullOrEmpty(basePath) || basePath == "/"
-                    ? relative
-                    : $"{basePath}{relative}";
+            var ordered = matches
+                .OrderBy(m => m.Start)
+                .ThenByDescending(m => m.Length)
+                .ToList();
 
-            // Build a same-origin, URL-encoded file path for the viewer
-            var encodedFileName = Uri.EscapeDataString(FileName);
-            var pdfUrl = PathBaseAware($"/uploads/{encodedFileName}");
-            var encodedPdfUrl = Uri.EscapeDataString(pdfUrl);
+            var canonical = new List<Hit>(ordered.Count);
+            var seen = new HashSet<(int s, int e)>();
+            int lastEnd = -1;
 
-            ViewerUrl = PathBaseAware($"/pdfjs/web/viewer.html?file={encodedPdfUrl}");
+            foreach (var m in ordered)
+            {
+                if (!seen.Add((m.Start, m.End))) continue;
+                if (m.Start < lastEnd) continue;
+                canonical.Add(m);
+                lastEnd = m.End;
+            }
+
+            var sb = new StringBuilder(text.Length + canonical.Count * 40);
+            int cursor = 0;
+
+            foreach (var m in canonical)
+            {
+                if (cursor < m.Start)
+                    sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor, m.Start - cursor)));
+
+                var encoded = HtmlEncoder.Default.Encode(text.Substring(m.Start, m.Length));
+                sb.Append($"<mark style=\"background-color:{colorForKeyword(m.Keyword)}\">{encoded}</mark>");
+                cursor = m.End;
+            }
+
+            if (cursor < text.Length)
+                sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor)));
+
+            return new MarkupString(sb.ToString());
+        }
+
+        private static void Collect(Regex rx, string text, List<Keyword> sourceKeywords, List<Hit> sink)
+        {
+            foreach (Match m in rx.Matches(text))
+            {
+                for (int i = 0; i < sourceKeywords.Count; i++)
+                {
+                    var g = m.Groups[$"k{i}"];
+                    if (g.Success)
+                    {
+                        sink.Add(new Hit(g.Index, g.Index + g.Length, sourceKeywords[i]));
+                        break;
+                    }
+                }
+            }
         }
     }
 }

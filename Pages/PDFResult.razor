@@ -1,12 +1,146 @@
-@page "/result/{FileName}"
+@page "/results"
+@inject NavigationManager Navigation
+@inject SmartDocumentReview.Services.ResultStateService ResultStateService
+@using System.Linq
+@using System.Text
+@using System.Text.RegularExpressions
+@using System.Text.Encodings.Web
+@using SmartDocumentReview.Models
+@using SmartDocumentReview.Shared
 
-@if (!string.IsNullOrWhiteSpace(ViewerUrl))
-{
-    <iframe src="@ViewerUrl"
-            title="PDF Viewer"
-            style="width:100%;height:80vh;border:none;"></iframe>
-}
-else
-{
-    <div class="text-danger">No PDF to display.</div>
+<h3>Matched Results</h3>
+
+<div style="display: flex; height: 90vh;">
+    <!-- Left: Match Results -->
+    <div style="width: 40%; overflow-y: auto; padding: 1rem;">
+        @foreach (var pageGroup in ResultStateService.Matches.GroupBy(m => m.PageNumber))
+        {
+            <div style="margin-bottom: 1.5rem;">
+                <h4 @onclick="async () => await LoadPdfAsync(pageGroup.Key)"
+                    style="cursor: pointer; color: blue; text-decoration: underline;">
+                    Page @pageGroup.Key
+                </h4>
+                @foreach (var match in pageGroup)
+                {
+                    <div style="margin-left: 1rem; margin-bottom: 0.75rem;">
+                        <strong>@match.SectionTitle</strong>
+                        <p>@(HighlightKeywords(match.MatchedText))</p>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <!-- Right: PDF Viewer -->
+    <div style="width: 60%; height: 100%;">
+        <iframe id="pdfViewer" src="@viewerSrc" width="100%" height="100%" frameborder="0"></iframe>
+    </div>
+</div>
+
+@code {
+    private readonly string[] HighlightPalette = new[] { "#ffff00", "#ffb6c1", "#90ee90", "#add8e6", "#ffa07a" };
+    private Dictionary<Keyword, string> keywordColors = new();
+    private int? _pendingPage;
+    private string? viewerSrc;
+
+    protected override void OnInitialized()
+    {
+        var keywords = ResultStateService.Keywords;
+        keywordColors = keywords.Select((k, i) => new { k, i })
+                                .ToDictionary(x => x.k, x => HighlightPalette[x.i % HighlightPalette.Length]);
+
+        if (ResultStateService.Matches.Count > 0)
+        {
+            _pendingPage = ResultStateService.Matches[0].PageNumber;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingPage.HasValue)
+        {
+            await LoadPdfAsync(_pendingPage.Value);
+            _pendingPage = null;
+        }
+    }
+
+    async Task LoadPdfAsync(int page)
+    {
+        var file = "/uploads/latest.pdf";
+        var overlay = "/uploads/latest-highlights.json"; // Use same overlay as Upload.razor
+        viewerSrc = $"/pdfjs/index.html?file={Uri.EscapeDataString(file)}&page={page}&overlay={Uri.EscapeDataString(overlay)}";
+    }
+
+    MarkupString HighlightKeywords(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return (MarkupString)HtmlEncoder.Default.Encode(text ?? string.Empty);
+
+        var allKeywords = keywordColors.Keys.ToList();
+        var wholeKw = allKeywords.Where(k => !k.AllowPartial).ToList();
+        var partKw  = allKeywords.Where(k =>  k.AllowPartial).ToList();
+
+        var ranges = new List<(int start, int end, string color)>(32);
+
+        static void Collect(Regex rx, string sourceText, List<Keyword> srcKeywords, Dictionary<Keyword,string> colors, List<(int,int,string)> sink)
+        {
+            foreach (Match m in rx.Matches(sourceText))
+            {
+                for (int i = 0; i < srcKeywords.Count; i++)
+                {
+                    var g = m.Groups[$"k{i}"];
+                    if (g.Success)
+                    {
+                        var kw = srcKeywords[i];
+                        sink.Add((g.Index, g.Index + g.Length, colors[kw]));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (wholeKw.Count > 0)
+        {
+            var rxWhole = KeywordRegex.BuildWholeWordRegex(wholeKw.Select(k => k.Text));
+            Collect(rxWhole, text, wholeKw, keywordColors, ranges);
+        }
+        if (partKw.Count > 0)
+        {
+            var rxPart = KeywordRegex.BuildPartialRegex(partKw.Select(k => k.Text));
+            Collect(rxPart, text, partKw, keywordColors, ranges);
+        }
+
+        if (ranges.Count == 0)
+            return (MarkupString)HtmlEncoder.Default.Encode(text);
+
+        var ordered = ranges
+            .OrderBy(r => r.start)
+            .ThenByDescending(r => r.end - r.start)
+            .ToList();
+
+        var sb = new StringBuilder(text.Length + ordered.Count * 40);
+        var seen = new HashSet<(int s, int e)>();
+        int cursor = 0;
+        int lastEnd = -1;
+
+        foreach (var r in ordered)
+        {
+            if (!seen.Add((r.start, r.end))) continue;
+            if (r.start < lastEnd) continue;
+
+            if (cursor < r.start)
+                sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor, r.start - cursor)));
+
+            var encodedMatch = HtmlEncoder.Default.Encode(text.Substring(r.start, r.end - r.start));
+            sb.Append($"<mark style='background-color:{r.color}'>{encodedMatch}</mark>");
+
+            cursor = r.end;
+            lastEnd = r.end;
+        }
+
+        if (cursor < text.Length)
+            sb.Append(HtmlEncoder.Default.Encode(text.Substring(cursor)));
+
+        return (MarkupString)sb.ToString();
+    }
 }
