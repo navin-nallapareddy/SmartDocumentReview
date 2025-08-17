@@ -243,6 +243,7 @@
         var file = "/uploads/latest.pdf";
         var overlay = "/uploads/latest-highlights.json";
         viewerSrc = $"/pdfjs/index.html?file={Uri.EscapeDataString(file)}&page={page}&overlay={Uri.EscapeDataString(overlay)}";
+        await InvokeAsync(StateHasChanged);
     }
 
     MarkupString HighlightKeywords(string text)
